@@ -1,32 +1,34 @@
 #!/usr/bin/env python3
-"""Plot token distributions for metrics traces using TraceReader."""
+"""Plot token distributions for metrics traces using data_loader."""
 
 import argparse
 import os
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
-from readers.trace_reader import TraceReader
+from readers.data_loader import load_metrics_dataframe
 from utils.plot import setup_plot_style
 
 
-def _load_records(csv_path: str) -> List:
-    """Load all metrics records from the given CSV path."""
-    reader = TraceReader(csv_path)
-    return list(reader)
+def _load_records(csv_path: str) -> pd.DataFrame:
+    """Load all metrics records from the given CSV path using data_loader."""
+    return load_metrics_dataframe(csv_path, apply_transforms=True)
 
 
-def extract_token_data(records: Iterable, model_name: str) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+def extract_token_data(
+    records: pd.DataFrame, model_name: str
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """Extract arrays of input and output tokens for the requested model."""
     input_tokens: List[int] = []
     output_tokens: List[int] = []
-    for record in records:
+    for record in records.itertuples():
         model = getattr(record, "model_name", None)
         chute = getattr(record, "chute_id", None)
         if model == model_name or chute == model_name:
@@ -37,7 +39,13 @@ def extract_token_data(records: Iterable, model_name: str) -> Tuple[Optional[np.
     return np.array(input_tokens), np.array(output_tokens)
 
 
-def plot_cdf(data_dict: Dict[str, np.ndarray], title: str, xlabel: str, output_file: str, logx: bool = True) -> None:
+def plot_cdf(
+    data_dict: Dict[str, np.ndarray],
+    title: str,
+    xlabel: str,
+    output_file: str,
+    logx: bool = True,
+) -> None:
     """Plot the CDF for each dataset in data_dict and save the figure."""
     plt.figure(figsize=(12, 8))
     line_styles = ["-", "--", "-.", ":", "-", "--", "-.", ":", "-", "--", "-.", ":"]
@@ -73,7 +81,9 @@ def plot_cdf(data_dict: Dict[str, np.ndarray], title: str, xlabel: str, output_f
     print(f"Saved: {output_file}")
 
 
-def _select_models(records: Iterable, requested: Optional[List[str]], limit: int) -> List[str]:
+def _select_models(
+    records: pd.DataFrame, requested: Optional[List[str]], limit: int
+) -> List[str]:
     """Return the models to plot, defaulting to the top-N by frequency."""
     if requested:
         seen = []
@@ -81,13 +91,18 @@ def _select_models(records: Iterable, requested: Optional[List[str]], limit: int
             if model not in seen:
                 seen.append(model)
         return seen
-    counts = Counter(getattr(record, "model_name", getattr(record, "chute_id", "unknown")) for record in records)
+    counts = Counter(
+        getattr(record, "model_name", getattr(record, "chute_id", "unknown"))
+        for record in records.itertuples()
+    )
     return [model for model, _ in counts.most_common(limit)]
 
 
-def main(csv_path: str, models: Optional[List[str]], output_dir: str, top_k: int) -> None:
+def main(
+    csv_path: str, models: Optional[List[str]], output_dir: str, top_k: int
+) -> None:
     records = _load_records(csv_path)
-    if not records:
+    if records.empty:
         raise RuntimeError(f"No records found in {csv_path}")
 
     target_models = _select_models(records, models, top_k)
@@ -116,8 +131,10 @@ def main(csv_path: str, models: Optional[List[str]], output_dir: str, top_k: int
     if not input_tokens_data:
         raise RuntimeError("No token data available after filtering")
 
-    output_path = Path(output_dir)
+    trace_name = os.path.basename(csv_path).split(".")[0]
+    output_path = Path(f"{output_dir}/figures/token_distributions/{trace_name}")
     output_path.mkdir(parents=True, exist_ok=True)
+    print(output_path)
 
     print("\nCreating input tokens CDF plot...")
     plot_cdf(
@@ -141,7 +158,7 @@ def main(csv_path: str, models: Optional[List[str]], output_dir: str, top_k: int
         "Output/Input Token Distribution",
         "Output/Input Ratio",
         str(output_path / "input_output_ratio_cdf.png"),
-        logx=False,
+        # logx=False,
     )
 
     print("\nPlotting complete! Outputs saved to:")
@@ -155,7 +172,9 @@ def main(csv_path: str, models: Optional[List[str]], output_dir: str, top_k: int
 
 if __name__ == "__main__":
     setup_plot_style()
-    parser = argparse.ArgumentParser(description="Plot token distributions for metrics traces")
+    parser = argparse.ArgumentParser(
+        description="Plot token distributions for metrics traces"
+    )
     parser.add_argument("csv_path", help="Path to the metrics CSV file")
     parser.add_argument(
         "--models",

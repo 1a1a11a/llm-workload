@@ -10,11 +10,10 @@ import seaborn as sns
 import numpy as np
 from collections import Counter
 import os
-import json
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from readers.metrics_record import COLUMN_MAPPINGS
+from readers.data_loader import load_metrics_dataframe
 
 # Set style for better plots
 plt.style.use("seaborn-v0_8")
@@ -24,48 +23,6 @@ sns.set_palette("husl")
 # invocation_id is excluded because it's a unique identifier for each request
 # timestamp columns are excluded because they represent specific points in time (very high uniqueness)
 EXCLUDED_COLUMNS = {"invocation_id", "started_at", "completed_at"}
-
-
-def load_chute_to_model_mapping(json_path="chutes_models.json"):
-    """Load chute_id to model_name mapping from JSON file"""
-    try:
-        with open(json_path, "r") as f:
-            data = json.load(f)
-
-        chute_to_model = {}
-        for item in data.get("items", []):
-            chute_id = item.get("chute_id")
-            model_name = item.get("name")
-            if chute_id and model_name:
-                chute_to_model[chute_id] = model_name
-
-        print(f"Loaded mapping for {len(chute_to_model)} chutes")
-        return chute_to_model
-    except Exception as e:
-        print(f"Error loading chute mapping: {e}")
-        return {}
-
-
-def add_model_name_to_dataframe(df, chute_mapping):
-    """Add model_name column to DataFrame by mapping chute_id to model names"""
-    unmapped_count = 0
-    total_count = len(df)
-
-    # Create model_name column
-    df = df.copy()
-    df['model_name'] = df['chute_id'].map(chute_mapping)
-
-    # For unmapped values, use chute_id as fallback
-    unmapped_mask = df['model_name'].isnull()
-    df.loc[unmapped_mask, 'model_name'] = df.loc[unmapped_mask, 'chute_id']
-    unmapped_count = unmapped_mask.sum()
-
-    if unmapped_count > 0:
-        print(
-            f"Warning: {unmapped_count}/{total_count} chute_id values could not be mapped to model names"
-        )
-
-    return df
 
 
 def analyze_column_uniques(df, column_name):
@@ -91,13 +48,9 @@ def analyze_column_uniques(df, column_name):
     }
 
 
-def plot_unique_values_cdf(df, output_dir="figures", chute_mapping=None):
+def plot_unique_values_cdf(df, output_dir="figures"):
     """Plot CDF of unique values across all columns"""
     os.makedirs(output_dir, exist_ok=True)
-
-    # Apply model name mapping if provided
-    if chute_mapping:
-        df = add_model_name_to_dataframe(df, chute_mapping)
 
     # Define which fields to analyze
     fields_to_analyze = [
@@ -185,13 +138,9 @@ def plot_unique_values_cdf(df, output_dir="figures", chute_mapping=None):
     plt.show()
 
 
-def plot_categorical_distributions(df, output_dir="figures", chute_mapping=None):
+def plot_categorical_distributions(df, output_dir="figures"):
     """Plot distributions for categorical columns"""
     os.makedirs(output_dir, exist_ok=True)
-
-    # Apply model name mapping if provided
-    if chute_mapping:
-        df = add_model_name_to_dataframe(df, chute_mapping)
 
     categorical_cols = ["function_name", "model_name", "user_id"]
 
@@ -248,13 +197,9 @@ def plot_categorical_distributions(df, output_dir="figures", chute_mapping=None)
         plt.show()
 
 
-def plot_numerical_distributions(df, output_dir="figures", chute_mapping=None):
+def plot_numerical_distributions(df, output_dir="figures"):
     """Plot distributions for numerical columns"""
     os.makedirs(output_dir, exist_ok=True)
-
-    # Apply model name mapping if provided
-    if chute_mapping:
-        df = add_model_name_to_dataframe(df, chute_mapping)
 
     numerical_cols = ["input_tokens", "output_tokens", "ttft"]
 
@@ -324,13 +269,9 @@ def plot_numerical_distributions(df, output_dir="figures", chute_mapping=None):
         print(f"  75th percentile: {np.percentile(data_array, 75):.2f}")
 
 
-def plot_timestamp_analysis(df, output_dir="figures", chute_mapping=None):
+def plot_timestamp_analysis(df, output_dir="figures"):
     """Analyze timestamp columns"""
     os.makedirs(output_dir, exist_ok=True)
-
-    # Apply model name mapping if provided
-    if chute_mapping:
-        df = add_model_name_to_dataframe(df, chute_mapping)
 
     timestamp_cols = ["started_at", "completed_at"]
 
@@ -407,29 +348,19 @@ def plot_timestamp_analysis(df, output_dir="figures", chute_mapping=None):
 
 def analyze_one_trace(
     file_path="/home/juncheng/workspace/prefix_cache/requests/gemma-3-27b-it.parquet",
-    chute_mapping=None,
 ):
     """Analyze one trace"""
 
     print("Loading data...")
     trace_name = os.path.basename(file_path).split(".")[0]
 
-    # Load parquet file directly with pandas
-    if file_path.endswith('.parquet'):
-        df = pd.read_parquet(file_path)
-    else:
-        df = pd.read_csv(file_path)
-
-    # Apply column renaming based on MetricsRecord mappings
-    df.rename(columns=COLUMN_MAPPINGS, inplace=True)
+    # Load data using the utility function with transformations
+    df = load_metrics_dataframe(file_path, apply_transforms=True, max_rows=100000000)
 
     print(f"Loaded dataframe with shape: {df.shape}")
     print(f"Columns: {list(df.columns)}")
 
-    # Use provided chute mapping or load if not provided
-    if chute_mapping is None:
-        print("Loading chute to model mapping...")
-        chute_mapping = load_chute_to_model_mapping()
+    # Note: model_name mapping and transformations are handled in load_metrics_dataframe
 
     print("\n" + "=" * 50)
     print(f"ANALYZING METRICS DATA: {trace_name}")
@@ -439,17 +370,17 @@ def analyze_one_trace(
     output_dir = f"figures/metrics_analysis/{trace_name}"
     os.makedirs(output_dir, exist_ok=True)
 
-    # Analyze unique values
-    plot_unique_values_cdf(df, output_dir, chute_mapping)
+    # Analyze unique values (model_name mapping already applied in data loading)
+    plot_unique_values_cdf(df, output_dir)
 
-    # Categorical distributions
-    plot_categorical_distributions(df, output_dir, chute_mapping)
+    # Categorical distributions (model_name mapping already applied in data loading)
+    plot_categorical_distributions(df, output_dir)
 
-    # Numerical distributions
-    plot_numerical_distributions(df, output_dir, chute_mapping)
+    # Numerical distributions (model_name mapping already applied in data loading)
+    plot_numerical_distributions(df, output_dir)
 
-    # Timestamp analysis
-    plot_timestamp_analysis(df, output_dir, chute_mapping)
+    # Timestamp analysis (model_name mapping already applied in data loading)
+    plot_timestamp_analysis(df, output_dir)
 
     print("\nAnalysis complete! Plots saved to:", output_dir)
     print("Generated files:")
@@ -460,10 +391,6 @@ def analyze_one_trace(
 
 def main():
     """Main function"""
-    # Load chute to model mapping once for all files
-    print("Loading chute to model mapping...")
-    chute_mapping = load_chute_to_model_mapping()
-
     file_path = "/home/juncheng/workspace/prefix_cache/data/metrics_30day/"
     # file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
     file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.parquet"
@@ -472,9 +399,9 @@ def main():
     if os.path.isdir(file_path):
         for file in os.listdir(file_path):
             if file.endswith(".parquet"):
-                analyze_one_trace(os.path.join(file_path, file), chute_mapping)
+                analyze_one_trace(os.path.join(file_path, file))
     else:
-        analyze_one_trace(file_path, chute_mapping)
+        analyze_one_trace(file_path)
 
 
 if __name__ == "__main__":
