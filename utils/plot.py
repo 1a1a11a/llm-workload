@@ -8,10 +8,9 @@ def setup_plot_style():
             "font.size": 16,
             "axes.labelsize": 20,
             "axes.titlesize": 22,
-            "xtick.labelsize": 16,
-            "ytick.labelsize": 16,
-            "legend.fontsize": 14,
+            "xtick.labelsize": 20,
+            "ytick.labelsize": 20,
+            "legend.fontsize": 20,
             "figure.titlesize": 24,
         }
     )
-

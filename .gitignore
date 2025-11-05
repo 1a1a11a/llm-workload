@@ -4,3 +4,5 @@ __pycache__
 *.png
 *.zst
 
+._.DS_Store
+.DS_Store

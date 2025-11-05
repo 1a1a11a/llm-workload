@@ -18,37 +18,39 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
+
 # Load chutes models mapping from JSON file
 def load_chutes_models_map(json_path: str = None) -> Dict[str, str]:
     """
     Load the mapping from chute_id to model name from a JSON file.
-    
+
     Args:
         json_path: Path to the chutes_models.json file. If None, looks for it in the parent directory.
-        
+
     Returns:
         Dictionary mapping chute_id to model name
     """
     if json_path is None:
         # Default path is the parent directory of the readers folder
         json_path = os.path.join(parent_dir, "chutes_models.json")
-    
+
     try:
-        with open(json_path, 'r') as f:
+        with open(json_path, "r") as f:
             data = json.load(f)
-        
+
         # Create mapping from chute_id to name
         chutes_map = {}
-        for item in data.get('items', []):
-            chute_id = item.get('chute_id')
-            name = item.get('name')
+        for item in data.get("items", []):
+            chute_id = item.get("chute_id")
+            name = item.get("name")
             if chute_id and name:
                 chutes_map[chute_id] = name
-                
+
         return chutes_map
     except Exception as e:
         warnings.warn(f"Failed to load chutes models mapping from {json_path}: {e}")
         return {}
+
 
 # Load the mapping at module level
 CHUTES_MODELS_MAP = load_chutes_models_map()
@@ -56,35 +58,32 @@ CHUTES_MODELS_MAP = load_chutes_models_map()
 # Column mappings for standardizing column names from different data sources
 COLUMN_MAPPINGS = {
     # Timestamp columns
-    'start_time': 'started_at',
-    'start': 'started_at',
-    'begin_time': 'started_at',
-    'end_time': 'completed_at',
-    'end': 'completed_at',
-    'finish_time': 'completed_at',
-    
+    "timestamp": "started_at",
+    "start_time": "started_at",
+    "start": "started_at",
+    "begin_time": "started_at",
+    "end_time": "completed_at",
+    "end": "completed_at",
+    "finish_time": "completed_at",
     # Token columns
-    'prompt_tokens': 'input_tokens',
-    'input': 'input_tokens',
-    'request_tokens': 'input_tokens',
-    'generation_tokens': 'output_tokens',
-    'output': 'output_tokens',
-    'response_tokens': 'output_tokens',
-    'completion_tokens': 'output_tokens',
-    
+    "prompt_tokens": "input_tokens",
+    "input": "input_tokens",
+    "request_tokens": "input_tokens",
+    "generation_tokens": "output_tokens",
+    "output": "output_tokens",
+    "response_tokens": "output_tokens",
+    "completion_tokens": "output_tokens",
     # Performance metrics
-    'tokens_per_second': 'completion_tps',
-    'tps': 'completion_tps',
-    'throughput': 'completion_tps',
-    
+    "tokens_per_second": "completion_tps",
+    "tps": "completion_tps",
+    "throughput": "completion_tps",
     # ID columns
-    'id': 'chute_id',
-    'model_id': 'chute_id',
-    'request_id': 'chute_id',
-    
+    "id": "chute_id",
+    "model_id": "chute_id",
+    "request_id": "chute_id",
     # Model name columns
-    'model': 'model_name',
-    'model_display_name': 'model_name',
+    "model": "model_name",
+    "model_display_name": "model_name",
 }
 
 
@@ -92,7 +91,7 @@ def load_metrics_dataframe(
     file_path: str,
     apply_transforms: bool = True,
     max_memory_gb: Optional[float] = None,
-    max_rows: Optional[int] = None
+    max_rows: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     Load CSV or Parquet file into a DataFrame with proper column mapping and transformations.
@@ -116,12 +115,18 @@ def load_metrics_dataframe(
     # Load file based on extension with memory consideration
     file_size_gb = os.path.getsize(file_path) / (1024**3)  # GB
 
-    if file_path.lower().endswith('.parquet'):
-        df = _load_parquet_with_memory_check(file_path, file_size_gb, max_memory_gb, max_rows)
-    elif file_path.lower().endswith('.csv'):
-        df = _load_csv_with_memory_check(file_path, file_size_gb, max_memory_gb, max_rows)
+    if file_path.lower().endswith(".parquet"):
+        df = _load_parquet_with_memory_check(
+            file_path, file_size_gb, max_memory_gb, max_rows
+        )
+    elif file_path.lower().endswith(".csv"):
+        df = _load_csv_with_memory_check(
+            file_path, file_size_gb, max_memory_gb, max_rows
+        )
     else:
-        raise ValueError(f"Unsupported file format: {file_path}. Only .csv and .parquet are supported.")
+        raise ValueError(
+            f"Unsupported file format: {file_path}. Only .csv and .parquet are supported."
+        )
 
     # Apply column renaming
     df = df.rename(columns=COLUMN_MAPPINGS)
@@ -133,10 +138,7 @@ def load_metrics_dataframe(
 
 
 def _load_parquet_with_memory_check(
-    file_path: str,
-    file_size_gb: float,
-    max_memory_gb: float,
-    max_rows: Optional[int]
+    file_path: str, file_size_gb: float, max_memory_gb: float, max_rows: Optional[int]
 ) -> pd.DataFrame:
     """Load parquet file with memory usage estimation and optional row limiting."""
     # Estimate memory usage for parquet (typically 2-5x file size when loaded)
@@ -145,7 +147,9 @@ def _load_parquet_with_memory_check(
     if max_rows is not None:
         # Use PyArrow to read only first max_rows rows efficiently
         df = _read_parquet_first_n_rows(file_path, max_rows)
-        warnings.warn(f"Loading only first {max_rows} rows from parquet file due to max_rows parameter")
+        warnings.warn(
+            f"Loading only first {max_rows} rows from parquet file due to max_rows parameter"
+        )
     elif estimated_memory_gb > max_memory_gb:
         # For memory limits, we need to estimate row count that would fit
         # Use PyArrow to read in batches and accumulate until we hit memory limit
@@ -194,7 +198,9 @@ def _read_parquet_first_n_rows(file_path: str, n_rows: int) -> pd.DataFrame:
         return df.head(n_rows)
 
 
-def _read_parquet_with_memory_limit(file_path: str, max_memory_gb: float) -> pd.DataFrame:
+def _read_parquet_with_memory_limit(
+    file_path: str, max_memory_gb: float
+) -> pd.DataFrame:
     """Read parquet file while monitoring memory usage."""
     try:
         parquet_file = pq.ParquetFile(file_path)
@@ -226,7 +232,9 @@ def _read_parquet_with_memory_limit(file_path: str, max_memory_gb: float) -> pd.
             return parquet_file.read_row_group(0).to_pandas()
 
     except Exception as e:
-        warnings.warn(f"PyArrow memory-limited reading failed: {e}. Falling back to pandas.")
+        warnings.warn(
+            f"PyArrow memory-limited reading failed: {e}. Falling back to pandas."
+        )
         # Fallback to pandas approach
         df_full = pd.read_parquet(file_path)
         actual_memory_gb = estimate_dataframe_memory_usage(df_full)
@@ -244,10 +252,7 @@ def _read_parquet_with_memory_limit(file_path: str, max_memory_gb: float) -> pd.
 
 
 def _load_csv_with_memory_check(
-    file_path: str,
-    file_size_gb: float,
-    max_memory_gb: float,
-    max_rows: Optional[int]
+    file_path: str, file_size_gb: float, max_memory_gb: float, max_rows: Optional[int]
 ) -> pd.DataFrame:
     """Load CSV file with memory usage estimation and optional row limiting."""
     # Estimate memory usage for CSV (typically 5-10x file size when loaded due to string processing)
@@ -256,7 +261,9 @@ def _load_csv_with_memory_check(
     if max_rows is not None:
         # Load only first max_rows rows
         df = pd.read_csv(file_path, nrows=max_rows)
-        warnings.warn(f"Loading only first {max_rows} rows from CSV file due to max_rows parameter")
+        warnings.warn(
+            f"Loading only first {max_rows} rows from CSV file due to max_rows parameter"
+        )
     elif estimated_memory_gb > max_memory_gb:
         # Load full file first and check actual memory usage
         df_full = pd.read_csv(file_path)
@@ -303,75 +310,83 @@ def get_system_memory_info() -> Dict[str, float]:
     """
     mem = psutil.virtual_memory()
     return {
-        'total_gb': mem.total / (1024**3),
-        'available_gb': mem.available / (1024**3),
-        'used_gb': mem.used / (1024**3),
-        'percentage': mem.percent
+        "total_gb": mem.total / (1024**3),
+        "available_gb": mem.available / (1024**3),
+        "used_gb": mem.used / (1024**3),
+        "percentage": mem.percent,
     }
 
 
 def _apply_metrics_transforms(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Apply transformations similar to MetricsRecord.__post_init__ to the DataFrame.
+    Apply transformations
 
     This includes:
     - Calculating duration from started_at and completed_at
     - Calculating completion_tps from tokens/duration
     - Setting model_name from chute_id mapping
     """
-    df = df.copy()
+    # df = df.copy()
+
+    # Drop invocation_id column to save memory if it exists
+    if "invocation_id" in df.columns:
+        df = df.drop(columns=["invocation_id"])
 
     # Convert timestamp columns to datetime if they exist
-    if 'started_at' in df.columns:
-        df['started_at'] = pd.to_datetime(df['started_at'], errors='coerce')
-    if 'completed_at' in df.columns:
-        df['completed_at'] = pd.to_datetime(df['completed_at'], errors='coerce')
+    if "started_at" in df.columns:
+        df["started_at"] = pd.to_datetime(df["started_at"], errors="coerce")
+    if "completed_at" in df.columns:
+        df["completed_at"] = pd.to_datetime(df["completed_at"], errors="coerce")
 
     # Calculate duration where both timestamps exist
-    if 'started_at' in df.columns and 'completed_at' in df.columns:
+    if "started_at" in df.columns and "completed_at" in df.columns:
         # Create a mask for rows where both timestamps are valid
-        valid_mask = df['started_at'].notna() & df['completed_at'].notna()
-        df.loc[valid_mask, 'duration'] = (
-            df.loc[valid_mask, 'completed_at'] - df.loc[valid_mask, 'started_at']
+        valid_mask = df["started_at"].notna() & df["completed_at"].notna()
+        df.loc[valid_mask, "duration"] = (
+            df.loc[valid_mask, "completed_at"] - df.loc[valid_mask, "started_at"]
         ).dt.total_seconds()
 
     # Calculate completion_tps where possible
-    if 'completion_tps' in df.columns:
+    if "completion_tps" in df.columns:
         # Only calculate where completion_tps is missing/null
-        missing_tps_mask = df['completion_tps'].isna()
+        missing_tps_mask = df["completion_tps"].isna()
 
         # Need duration, input_tokens, and output_tokens to be valid
         valid_calc_mask = (
-            missing_tps_mask &
-            df['duration'].notna() &
-            df['input_tokens'].notna() &
-            df['output_tokens'].notna() &
-            (df['input_tokens'] != -1) &
-            (df['output_tokens'] != -1) &
-            (df['duration'] > 0)
+            missing_tps_mask
+            & df["duration"].notna()
+            & df["input_tokens"].notna()
+            & df["output_tokens"].notna()
+            & (df["input_tokens"] != -1)
+            & (df["output_tokens"] != -1)
+            & (df["duration"] > 0)
         )
 
         # Calculate total tokens and completion_tps
-        df.loc[valid_calc_mask, 'total_tokens'] = (
-            df.loc[valid_calc_mask, 'input_tokens'] +
-            df.loc[valid_calc_mask, 'output_tokens']
+        df.loc[valid_calc_mask, "total_tokens"] = (
+            df.loc[valid_calc_mask, "input_tokens"]
+            + df.loc[valid_calc_mask, "output_tokens"]
         )
-        df.loc[valid_calc_mask, 'completion_tps'] = (
-            df.loc[valid_calc_mask, 'total_tokens'] /
-            df.loc[valid_calc_mask, 'duration']
+        df.loc[valid_calc_mask, "completion_tps"] = (
+            df.loc[valid_calc_mask, "total_tokens"]
+            / df.loc[valid_calc_mask, "duration"]
         )
 
     # Set model_name from chute_id mapping
-    if 'chute_id' in df.columns:
-        df['model_name'] = df['chute_id'].map(CHUTES_MODELS_MAP)
+    if "chute_id" in df.columns:
+        df["model_name"] = df["chute_id"].map(CHUTES_MODELS_MAP)
         # Fill unmapped values with chute_id as fallback
-        df['model_name'] = df['model_name'].fillna(df['chute_id'])
+        df["model_name"] = df["model_name"].fillna(df["chute_id"])
 
     return df
 
-if __name__ == "__main__":
-    df = load_metrics_dataframe("/home/juncheng/workspace/prefix_cache/metrics_1day.head.csv")
-    print(df)
-    df = load_metrics_dataframe("/home/juncheng/workspace/prefix_cache/metrics_1day.parquet")
-    print(df)
 
+if __name__ == "__main__":
+    df = load_metrics_dataframe(
+        "/home/juncheng/workspace/prefix_cache/metrics_1day.head.csv"
+    )
+    print(df)
+    df = load_metrics_dataframe(
+        "/home/juncheng/workspace/prefix_cache/metrics_1day.parquet"
+    )
+    print(df)

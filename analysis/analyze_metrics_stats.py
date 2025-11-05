@@ -6,18 +6,15 @@ Creates CDF, distribution plots, and pie charts for each column.
 
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 from collections import Counter
 import os
 import sys
+from multiprocessing import Pool, cpu_count
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from readers.data_loader import load_metrics_dataframe
 
-# Set style for better plots
-plt.style.use("seaborn-v0_8")
-sns.set_palette("husl")
 
 # Columns to exclude from analysis (too unique or not useful)
 # invocation_id is excluded because it's a unique identifier for each request
@@ -54,8 +51,10 @@ def plot_unique_values_cdf(df, output_dir="figures"):
 
     # Define which fields to analyze
     fields_to_analyze = [
-        "chute_id", "function_name", "user_id", "model_name",
-        "input_tokens", "output_tokens", "ttft", "duration", "completion_tps"
+        "chute_id",
+        "function_name",
+        "user_id",
+        "model_name",
     ]
 
     # Calculate statistics for each column
@@ -79,7 +78,6 @@ def plot_unique_values_cdf(df, output_dir="figures"):
             "uniqueness_ratio": unique_count / total_count if total_count > 0 else 0,
         }
 
-
     if not column_stats:
         return
 
@@ -99,43 +97,28 @@ def plot_unique_values_cdf(df, output_dir="figures"):
     # Plot unique counts
     ax.bar(range(len(sorted_columns)), sorted_uniques, alpha=0.7, label="Unique Values")
     ax.set_xticks(range(len(sorted_columns)))
-    ax.set_xticklabels(sorted_columns, rotation=45, ha="right")
-    ax.set_ylabel("Number of Unique Values")
-    ax.set_title("Unique Values per Column (Sorted)")
+    ax.set_xticklabels(sorted_columns, rotation=45, ha="right", fontsize=16)
+    ax.set_ylabel("Number of Unique Values", fontsize=16)
+    ax.set_title("Unique Values per Column (Sorted)", fontsize=16)
     ax.grid(True, alpha=0.3)
 
     # Add value labels on bars
     for i, v in enumerate(sorted_uniques):
-        ax.text(i, v + max(sorted_uniques) * 0.01, str(v), ha="center", va="bottom")
+        ax.text(
+            i,
+            v + max(sorted_uniques) * 0.01,
+            str(v),
+            ha="center",
+            va="bottom",
+            fontsize=20,
+        )
 
     plt.tight_layout()
     plt.savefig(
         f"{output_dir}/unique_values_per_column.png", dpi=300, bbox_inches="tight"
     )
-    plt.show()
-
-    # Plot uniqueness ratios
-    fig, ax = plt.subplots(figsize=(12, 8))
-    ax.bar(
-        range(len(sorted_columns)),
-        sorted_ratios,
-        alpha=0.7,
-        color="orange",
-        label="Uniqueness Ratio",
-    )
-    ax.set_xticks(range(len(sorted_columns)))
-    ax.set_xticklabels(sorted_columns, rotation=45, ha="right")
-    ax.set_ylabel("Uniqueness Ratio")
-    ax.set_title("Column Uniqueness Ratio (Unique/Total)")
-    ax.grid(True, alpha=0.3)
-
-    # Add value labels on bars
-    for i, v in enumerate(sorted_ratios):
-        ax.text(i, v + 0.01, ".3f", ha="center", va="bottom")
-
-    plt.tight_layout()
-    plt.savefig(f"{output_dir}/uniqueness_ratios.png", dpi=300, bbox_inches="tight")
-    plt.show()
+    plt.clf()
+    plt.close(fig)
 
 
 def plot_categorical_distributions(df, output_dir="figures"):
@@ -158,6 +141,11 @@ def plot_categorical_distributions(df, output_dir="figures"):
     for col in categorical_cols:
         value_counts = value_counters[col]
         if not value_counts:
+            continue
+
+        # Skip plotting model_name if there's only one model
+        if col == "model_name" and len(value_counts) == 1:
+            print(f"Skipping {col} distribution plot - only one model present")
             continue
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
@@ -194,14 +182,14 @@ def plot_categorical_distributions(df, output_dir="figures"):
         plt.savefig(
             f"{output_dir}/{col}_distribution.png", dpi=300, bbox_inches="tight"
         )
-        plt.show()
+        plt.close(fig)
 
 
 def plot_numerical_distributions(df, output_dir="figures"):
     """Plot distributions for numerical columns"""
     os.makedirs(output_dir, exist_ok=True)
 
-    numerical_cols = ["input_tokens", "output_tokens", "ttft"]
+    numerical_cols = ["input_tokens", "output_tokens", "ttft", "duration"]
 
     # Collect numerical data from DataFrame
     data_collectors = {}
@@ -219,40 +207,37 @@ def plot_numerical_distributions(df, output_dir="figures"):
             print(f"No valid data for {col}")
             continue
 
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
-
-        # Histogram
-        ax1.hist(data, bins=50, alpha=0.7, edgecolor="black")
-        ax1.set_title(f"{col} Histogram")
-        ax1.set_xlabel(col)
-        ax1.set_ylabel("Frequency")
-        ax1.grid(True, alpha=0.3)
-
-        # Box plot
-        ax2.boxplot(data)
-        ax2.set_title(f"{col} Box Plot")
-        ax2.set_ylabel(col)
-        ax2.grid(True, alpha=0.3)
+        # For token columns, only show CDF plot
+        fig, ax = plt.subplots(figsize=(12, 8))
 
         # CDF
         sorted_data = np.sort(data)
         yvals = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
-        ax3.plot(sorted_data, yvals, "b-", linewidth=2)
-        ax3.set_title(f"{col} CDF")
-        ax3.set_xlabel(col)
-        ax3.set_ylabel("Cumulative Probability")
-        ax3.grid(True, alpha=0.3)
+        ax.plot(sorted_data, yvals, "b-", linewidth=3, markersize=8)
 
-        # Q-Q plot (normal distribution)
-        from scipy import stats
+        # Set larger fonts specifically for CDF plots
+        ax.set_title(f"{col} CDF", pad=20, fontsize=20)
+        ax.set_xlabel(col, labelpad=10, fontsize=20)
+        ax.set_ylabel("Fraction of Requests (CDF)", labelpad=10, fontsize=20)
 
-        stats.probplot(data, dist="norm", plot=ax4)
-        ax4.set_title(f"{col} Q-Q Plot (vs Normal)")
-        ax4.grid(True, alpha=0.3)
+        # Set larger tick labels
+        ax.tick_params(axis="both", which="major", labelsize=20)
+
+        ax.grid(True, alpha=0.3)
+        ax.set_xscale("log")  # Set x-axis to log scale
+
+        # Add minor grid lines for better readability
+        ax.grid(True, which="minor", alpha=0.2, linestyle="--")
+
+        # Set y-axis limits to ensure full range is visible
+        ax.set_ylim(0, 1.05)
+
+        # Add a subtle background color for better contrast
+        ax.set_facecolor("#f8f9fa")
 
         plt.tight_layout()
-        plt.savefig(f"{output_dir}/{col}_analysis.png", dpi=300, bbox_inches="tight")
-        plt.show()
+        plt.savefig(f"{output_dir}/{col}_cdf.png", dpi=300, bbox_inches="tight")
+        plt.close(fig)
 
         # Convert to numpy array for statistics
         data_array = np.array(data)
@@ -273,14 +258,16 @@ def plot_timestamp_analysis(df, output_dir="figures"):
     """Analyze timestamp columns"""
     os.makedirs(output_dir, exist_ok=True)
 
-    timestamp_cols = ["started_at", "completed_at"]
+    timestamp_cols = [
+        "started_at",
+    ]
 
     # Collect timestamp data from DataFrame
     timestamp_collectors = {}
     for col in timestamp_cols:
         if col in df.columns:
             # Convert timestamps and filter out NaN values
-            timestamps = pd.to_datetime(df[col], errors='coerce').dropna().tolist()
+            timestamps = pd.to_datetime(df[col], errors="coerce").dropna().tolist()
             timestamp_collectors[col] = timestamps
         else:
             timestamp_collectors[col] = []
@@ -334,7 +321,7 @@ def plot_timestamp_analysis(df, output_dir="figures"):
                 dpi=300,
                 bbox_inches="tight",
             )
-            plt.show()
+            plt.close(fig)
 
             print(f"\n{col} Temporal Statistics:")
             print(
@@ -346,16 +333,14 @@ def plot_timestamp_analysis(df, output_dir="figures"):
             print(f"Error processing {col}: {e}")
 
 
-def analyze_one_trace(
-    file_path="/home/juncheng/workspace/prefix_cache/requests/gemma-3-27b-it.parquet",
-):
+def analyze_one_trace(file_path, single_model: bool):
     """Analyze one trace"""
 
     print("Loading data...")
     trace_name = os.path.basename(file_path).split(".")[0]
 
     # Load data using the utility function with transformations
-    df = load_metrics_dataframe(file_path, apply_transforms=True, max_rows=100000000)
+    df = load_metrics_dataframe(file_path, apply_transforms=True)
 
     print(f"Loaded dataframe with shape: {df.shape}")
     print(f"Columns: {list(df.columns)}")
@@ -367,7 +352,8 @@ def analyze_one_trace(
     print("=" * 50)
 
     # Create output directory
-    output_dir = f"figures/metrics_analysis/{trace_name}"
+    # output_dir = f"figures/metrics_analysis_per_model/{trace_name}"
+    output_dir = f"figures/{trace_name}"
     os.makedirs(output_dir, exist_ok=True)
 
     # Analyze unique values (model_name mapping already applied in data loading)
@@ -382,26 +368,42 @@ def analyze_one_trace(
     # Timestamp analysis (model_name mapping already applied in data loading)
     plot_timestamp_analysis(df, output_dir)
 
+
     print("\nAnalysis complete! Plots saved to:", output_dir)
     print("Generated files:")
     for file in os.listdir(output_dir):
         if file.endswith(".png"):
             print(f"  - {file}")
 
+    plt.close("all")
+
 
 def main():
     """Main function"""
     file_path = "/home/juncheng/workspace/prefix_cache/data/metrics_30day/"
     # file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
-    file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.parquet"
-    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.parquet"
-    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.csv"
-    if os.path.isdir(file_path):
-        for file in os.listdir(file_path):
-            if file.endswith(".parquet"):
-                analyze_one_trace(os.path.join(file_path, file))
+    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.parquet"
+    file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.csv"
+    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day_head.csv"
+    num_processes = cpu_count()
+
+    if os.path.isdir(file_path) and num_processes > 1:
+        # Get all files in the directory
+        files_to_process = [
+            os.path.join(file_path, f)
+            for f in os.listdir(file_path)
+            if f.endswith((".parquet", ".csv"))
+        ]
+
+        # Use multiprocessing to process files in parallel
+        print(
+            f"Processing {len(files_to_process)} files using {num_processes} processes..."
+        )
+
+        with Pool(num_processes) as p:
+            p.map(analyze_one_trace, files_to_process, [True] * len(files_to_process))
     else:
-        analyze_one_trace(file_path)
+        analyze_one_trace(file_path, False)
 
 
 if __name__ == "__main__":
