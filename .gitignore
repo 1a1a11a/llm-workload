@@ -1,0 +1,6 @@
+api_logs/
+*.csv
+__pycache__
+*.png
+*.zst
+
