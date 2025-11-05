@@ -15,6 +15,11 @@ import os
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
 
+# Columns to exclude from analysis (too unique or not useful)
+# invocation_id is excluded because it's a unique identifier for each request
+# timestamp columns are excluded because they represent specific points in time (very high uniqueness)
+EXCLUDED_COLUMNS = {'invocation_id', 'started_at', 'completed_at'}
+
 def load_data(file_path):
     """Load CSV data, skipping empty first line"""
     try:
@@ -52,6 +57,9 @@ def plot_unique_values_cdf(df, output_dir="figures"):
 
     column_stats = {}
     for col in df.columns:
+        if col in EXCLUDED_COLUMNS:
+            print(f"Skipping excluded column: {col}")
+            continue
         stats = analyze_column_uniques(df, col)
         if stats:
             column_stats[col] = stats
@@ -304,7 +312,8 @@ def analyze_one_trace(file_path="/home/juncheng/workspace/prefix_cache/requests/
 
 def main():
     """Main function"""
-    file_path = "/home/juncheng/workspace/prefix_cache/requests/"
+    file_path = "/home/juncheng/workspace/prefix_cache/data/metrics_30day/"
+    file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
     if os.path.isdir(file_path):
         for file in os.listdir(file_path):
             if file.endswith('.csv'):
