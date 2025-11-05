@@ -10,26 +10,63 @@ import seaborn as sns
 import numpy as np
 from collections import Counter
 import os
+import json
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from readers.metrics_record import COLUMN_MAPPINGS
 
 # Set style for better plots
-plt.style.use('seaborn-v0_8')
+plt.style.use("seaborn-v0_8")
 sns.set_palette("husl")
 
 # Columns to exclude from analysis (too unique or not useful)
 # invocation_id is excluded because it's a unique identifier for each request
 # timestamp columns are excluded because they represent specific points in time (very high uniqueness)
-EXCLUDED_COLUMNS = {'invocation_id', 'started_at', 'completed_at'}
+EXCLUDED_COLUMNS = {"invocation_id", "started_at", "completed_at"}
 
-def load_data(file_path):
-    """Load CSV data, skipping empty first line"""
+
+def load_chute_to_model_mapping(json_path="chutes_models.json"):
+    """Load chute_id to model_name mapping from JSON file"""
     try:
-        df = pd.read_csv(file_path, skiprows=0)
-        print(f"Loaded {len(df)} rows with {len(df.columns)} columns")
-        print(f"Columns: {list(df.columns)}")
-        return df
+        with open(json_path, "r") as f:
+            data = json.load(f)
+
+        chute_to_model = {}
+        for item in data.get("items", []):
+            chute_id = item.get("chute_id")
+            model_name = item.get("name")
+            if chute_id and model_name:
+                chute_to_model[chute_id] = model_name
+
+        print(f"Loaded mapping for {len(chute_to_model)} chutes")
+        return chute_to_model
     except Exception as e:
-        print(f"Error loading data: {e}")
-        return None
+        print(f"Error loading chute mapping: {e}")
+        return {}
+
+
+def add_model_name_to_dataframe(df, chute_mapping):
+    """Add model_name column to DataFrame by mapping chute_id to model names"""
+    unmapped_count = 0
+    total_count = len(df)
+
+    # Create model_name column
+    df = df.copy()
+    df['model_name'] = df['chute_id'].map(chute_mapping)
+
+    # For unmapped values, use chute_id as fallback
+    unmapped_mask = df['model_name'].isnull()
+    df.loc[unmapped_mask, 'model_name'] = df.loc[unmapped_mask, 'chute_id']
+    unmapped_count = unmapped_mask.sum()
+
+    if unmapped_count > 0:
+        print(
+            f"Warning: {unmapped_count}/{total_count} chute_id values could not be mapped to model names"
+        )
+
+    return df
+
 
 def analyze_column_uniques(df, column_name):
     """Analyze unique values in a column"""
@@ -42,27 +79,53 @@ def analyze_column_uniques(df, column_name):
     null_count = df[column_name].isnull().sum()
 
     print(f"\n{column_name}:")
-    print(f"  Total values:  {total_vals}, unique values: {unique_vals} ({unique_vals / total_vals:.4f})")
+    print(
+        f"  Total values:  {total_vals}, unique values: {unique_vals} ({unique_vals / total_vals:.4f})"
+    )
 
     return {
-        'total': total_vals,
-        'unique': unique_vals,
-        'null_count': null_count,
-        'uniqueness_ratio': unique_vals / total_vals if total_vals > 0 else 0
+        "total": total_vals,
+        "unique": unique_vals,
+        "null_count": null_count,
+        "uniqueness_ratio": unique_vals / total_vals if total_vals > 0 else 0,
     }
 
-def plot_unique_values_cdf(df, output_dir="figures"):
+
+def plot_unique_values_cdf(df, output_dir="figures", chute_mapping=None):
     """Plot CDF of unique values across all columns"""
     os.makedirs(output_dir, exist_ok=True)
 
+    # Apply model name mapping if provided
+    if chute_mapping:
+        df = add_model_name_to_dataframe(df, chute_mapping)
+
+    # Define which fields to analyze
+    fields_to_analyze = [
+        "chute_id", "function_name", "user_id", "model_name",
+        "input_tokens", "output_tokens", "ttft", "duration", "completion_tps"
+    ]
+
+    # Calculate statistics for each column
     column_stats = {}
-    for col in df.columns:
-        if col in EXCLUDED_COLUMNS:
-            print(f"Skipping excluded column: {col}")
+    for field_name in fields_to_analyze:
+        if field_name in EXCLUDED_COLUMNS:
+            print(f"Skipping excluded column: {field_name}")
             continue
-        stats = analyze_column_uniques(df, col)
-        if stats:
-            column_stats[col] = stats
+
+        if field_name not in df.columns:
+            continue
+
+        unique_count = df[field_name].nunique()
+        total_count = len(df[field_name])
+        null_count = df[field_name].isnull().sum()
+
+        column_stats[field_name] = {
+            "total": total_count,
+            "unique": unique_count,
+            "null_count": null_count,
+            "uniqueness_ratio": unique_count / total_count if total_count > 0 else 0,
+        }
+
 
     if not column_stats:
         return
@@ -71,8 +134,8 @@ def plot_unique_values_cdf(df, output_dir="figures"):
     fig, ax = plt.subplots(figsize=(12, 8))
 
     columns = list(column_stats.keys())
-    unique_counts = [column_stats[col]['unique'] for col in columns]
-    uniqueness_ratios = [column_stats[col]['uniqueness_ratio'] for col in columns]
+    unique_counts = [column_stats[col]["unique"] for col in columns]
+    uniqueness_ratios = [column_stats[col]["uniqueness_ratio"] for col in columns]
 
     # Sort by unique count
     sorted_indices = np.argsort(unique_counts)
@@ -81,91 +144,132 @@ def plot_unique_values_cdf(df, output_dir="figures"):
     sorted_ratios = [uniqueness_ratios[i] for i in sorted_indices]
 
     # Plot unique counts
-    ax.bar(range(len(sorted_columns)), sorted_uniques, alpha=0.7, label='Unique Values')
+    ax.bar(range(len(sorted_columns)), sorted_uniques, alpha=0.7, label="Unique Values")
     ax.set_xticks(range(len(sorted_columns)))
-    ax.set_xticklabels(sorted_columns, rotation=45, ha='right')
-    ax.set_ylabel('Number of Unique Values')
-    ax.set_title('Unique Values per Column (Sorted)')
+    ax.set_xticklabels(sorted_columns, rotation=45, ha="right")
+    ax.set_ylabel("Number of Unique Values")
+    ax.set_title("Unique Values per Column (Sorted)")
     ax.grid(True, alpha=0.3)
 
     # Add value labels on bars
     for i, v in enumerate(sorted_uniques):
-        ax.text(i, v + max(sorted_uniques) * 0.01, str(v), ha='center', va='bottom')
+        ax.text(i, v + max(sorted_uniques) * 0.01, str(v), ha="center", va="bottom")
 
     plt.tight_layout()
-    plt.savefig(f"{output_dir}/unique_values_per_column.png", dpi=300, bbox_inches='tight')
+    plt.savefig(
+        f"{output_dir}/unique_values_per_column.png", dpi=300, bbox_inches="tight"
+    )
     plt.show()
 
     # Plot uniqueness ratios
     fig, ax = plt.subplots(figsize=(12, 8))
-    bars = ax.bar(range(len(sorted_columns)), sorted_ratios, alpha=0.7, color='orange', label='Uniqueness Ratio')
+    ax.bar(
+        range(len(sorted_columns)),
+        sorted_ratios,
+        alpha=0.7,
+        color="orange",
+        label="Uniqueness Ratio",
+    )
     ax.set_xticks(range(len(sorted_columns)))
-    ax.set_xticklabels(sorted_columns, rotation=45, ha='right')
-    ax.set_ylabel('Uniqueness Ratio')
-    ax.set_title('Column Uniqueness Ratio (Unique/Total)')
+    ax.set_xticklabels(sorted_columns, rotation=45, ha="right")
+    ax.set_ylabel("Uniqueness Ratio")
+    ax.set_title("Column Uniqueness Ratio (Unique/Total)")
     ax.grid(True, alpha=0.3)
 
     # Add value labels on bars
     for i, v in enumerate(sorted_ratios):
-        ax.text(i, v + 0.01, '.3f', ha='center', va='bottom')
+        ax.text(i, v + 0.01, ".3f", ha="center", va="bottom")
 
     plt.tight_layout()
-    plt.savefig(f"{output_dir}/uniqueness_ratios.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{output_dir}/uniqueness_ratios.png", dpi=300, bbox_inches="tight")
     plt.show()
 
-def plot_categorical_distributions(df, output_dir="figures"):
+
+def plot_categorical_distributions(df, output_dir="figures", chute_mapping=None):
     """Plot distributions for categorical columns"""
     os.makedirs(output_dir, exist_ok=True)
 
-    categorical_cols = ['function_name', 'chute_id', 'user_id']
+    # Apply model name mapping if provided
+    if chute_mapping:
+        df = add_model_name_to_dataframe(df, chute_mapping)
+
+    categorical_cols = ["function_name", "model_name", "user_id"]
+
+    # Initialize counters for each categorical column
+    value_counters = {col: Counter() for col in categorical_cols}
+
+    # Count values for each categorical column
+    for col in categorical_cols:
+        if col in df.columns:
+            value_counts = df[col].value_counts()
+            for value, count in value_counts.items():
+                if pd.notna(value):  # Skip NaN values
+                    value_counters[col][value] += count
 
     for col in categorical_cols:
-        if col not in df.columns:
+        value_counts = value_counters[col]
+        if not value_counts:
             continue
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-        # Get value counts
-        value_counts = df[col].value_counts()
-        top_n = min(10, len(value_counts))  # Show top 10
+        # Convert to sorted list for top_n selection
+        sorted_counts = sorted(value_counts.items(), key=lambda x: x[1], reverse=True)
+        top_n = min(10, len(sorted_counts))
 
         # Pie chart (top categories)
-        top_values = value_counts.head(top_n)
-        if len(value_counts) > top_n:
-            other_count = value_counts[top_n:].sum()
-            top_values = pd.concat([top_values, pd.Series({'Other': other_count})])
+        top_items = sorted_counts[:top_n]
+        if len(sorted_counts) > top_n:
+            other_count = sum(count for _, count in sorted_counts[top_n:])
+            top_items.append(("Other", other_count))
 
-        ax1.pie(top_values.values, labels=top_values.index, autopct='%1.1f%%', startangle=90)
-        ax1.set_title(f'{col} Distribution (Top {top_n})')
-        ax1.axis('equal')
+        labels, values = zip(*top_items)
+        ax1.pie(values, labels=labels, autopct="%1.1f%%", startangle=90)
+        ax1.set_title(f"{col} Distribution (Top {top_n})")
+        ax1.axis("equal")
 
         # Bar chart
-        value_counts.head(top_n).plot(kind='bar', ax=ax2)
-        ax2.set_title(f'{col} Frequency (Top {top_n})')
-        ax2.set_ylabel('Count')
-        ax2.tick_params(axis='x', rotation=45)
+        top_labels, top_values = zip(*sorted_counts[:top_n])
+        ax2.bar(range(len(top_labels)), top_values)
+        ax2.set_title(f"{col} Frequency (Top {top_n})")
+        ax2.set_ylabel("Count")
+        ax2.set_xticks(range(len(top_labels)))
+        ax2.set_xticklabels(top_labels, rotation=45, ha="right")
 
         # Add count labels on bars
-        for i, v in enumerate(value_counts.head(top_n)):
-            ax2.text(i, v + max(value_counts.head(top_n)) * 0.01, str(v), ha='center', va='bottom')
+        max_val = max(top_values)
+        for i, v in enumerate(top_values):
+            ax2.text(i, v + max_val * 0.01, str(v), ha="center", va="bottom")
 
         plt.tight_layout()
-        plt.savefig(f"{output_dir}/{col}_distribution.png", dpi=300, bbox_inches='tight')
+        plt.savefig(
+            f"{output_dir}/{col}_distribution.png", dpi=300, bbox_inches="tight"
+        )
         plt.show()
 
-def plot_numerical_distributions(df, output_dir="figures"):
+
+def plot_numerical_distributions(df, output_dir="figures", chute_mapping=None):
     """Plot distributions for numerical columns"""
     os.makedirs(output_dir, exist_ok=True)
 
-    numerical_cols = ['input_tokens', 'output_tokens', 'ttft']
+    # Apply model name mapping if provided
+    if chute_mapping:
+        df = add_model_name_to_dataframe(df, chute_mapping)
+
+    numerical_cols = ["input_tokens", "output_tokens", "ttft"]
+
+    # Collect numerical data from DataFrame
+    data_collectors = {}
+    for col in numerical_cols:
+        if col in df.columns:
+            # Filter out NaN values and collect data
+            data = df[col].dropna().tolist()
+            data_collectors[col] = data
+        else:
+            data_collectors[col] = []
 
     for col in numerical_cols:
-        if col not in df.columns:
-            continue
-
-        # Remove null values for plotting
-        data = df[col].dropna()
-
+        data = data_collectors[col]
         if len(data) == 0:
             print(f"No valid data for {col}")
             continue
@@ -173,153 +277,205 @@ def plot_numerical_distributions(df, output_dir="figures"):
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
 
         # Histogram
-        ax1.hist(data, bins=50, alpha=0.7, edgecolor='black')
-        ax1.set_title(f'{col} Histogram')
+        ax1.hist(data, bins=50, alpha=0.7, edgecolor="black")
+        ax1.set_title(f"{col} Histogram")
         ax1.set_xlabel(col)
-        ax1.set_ylabel('Frequency')
+        ax1.set_ylabel("Frequency")
         ax1.grid(True, alpha=0.3)
 
         # Box plot
         ax2.boxplot(data)
-        ax2.set_title(f'{col} Box Plot')
+        ax2.set_title(f"{col} Box Plot")
         ax2.set_ylabel(col)
         ax2.grid(True, alpha=0.3)
 
         # CDF
         sorted_data = np.sort(data)
         yvals = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
-        ax3.plot(sorted_data, yvals, 'b-', linewidth=2)
-        ax3.set_title(f'{col} CDF')
+        ax3.plot(sorted_data, yvals, "b-", linewidth=2)
+        ax3.set_title(f"{col} CDF")
         ax3.set_xlabel(col)
-        ax3.set_ylabel('Cumulative Probability')
+        ax3.set_ylabel("Cumulative Probability")
         ax3.grid(True, alpha=0.3)
 
         # Q-Q plot (normal distribution)
         from scipy import stats
+
         stats.probplot(data, dist="norm", plot=ax4)
-        ax4.set_title(f'{col} Q-Q Plot (vs Normal)')
+        ax4.set_title(f"{col} Q-Q Plot (vs Normal)")
         ax4.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.savefig(f"{output_dir}/{col}_analysis.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{output_dir}/{col}_analysis.png", dpi=300, bbox_inches="tight")
         plt.show()
+
+        # Convert to numpy array for statistics
+        data_array = np.array(data)
 
         # Print statistics
         print(f"\n{col} Statistics:")
-        print(f"  Count: {len(data)}")
-        print(f"  Mean: {data.mean():.2f}")
-        print(f"  Median: {data.median():.2f}")
-        print(f"  Std: {data.std():.2f}")
-        print(f"  Min: {data.min():.2f}")
-        print(f"  Max: {data.max():.2f}")
-        print(f"  25th percentile: {data.quantile(0.25):.2f}")
-        print(f"  75th percentile: {data.quantile(0.75):.2f}")
+        print(f"  Count: {len(data_array)}")
+        print(f"  Mean: {data_array.mean():.2f}")
+        print(f"  Median: {np.median(data_array):.2f}")
+        print(f"  Std: {data_array.std():.2f}")
+        print(f"  Min: {data_array.min():.2f}")
+        print(f"  Max: {data_array.max():.2f}")
+        print(f"  25th percentile: {np.percentile(data_array, 25):.2f}")
+        print(f"  75th percentile: {np.percentile(data_array, 75):.2f}")
 
-def plot_timestamp_analysis(df, output_dir="figures"):
+
+def plot_timestamp_analysis(df, output_dir="figures", chute_mapping=None):
     """Analyze timestamp columns"""
     os.makedirs(output_dir, exist_ok=True)
 
-    timestamp_cols = ['started_at', 'completed_at']
+    # Apply model name mapping if provided
+    if chute_mapping:
+        df = add_model_name_to_dataframe(df, chute_mapping)
+
+    timestamp_cols = ["started_at", "completed_at"]
+
+    # Collect timestamp data from DataFrame
+    timestamp_collectors = {}
+    for col in timestamp_cols:
+        if col in df.columns:
+            # Convert timestamps and filter out NaN values
+            timestamps = pd.to_datetime(df[col], errors='coerce').dropna().tolist()
+            timestamp_collectors[col] = timestamps
+        else:
+            timestamp_collectors[col] = []
 
     for col in timestamp_cols:
-        if col not in df.columns:
+        timestamps = timestamp_collectors[col]
+        if len(timestamps) == 0:
             continue
 
-        # Convert to datetime
         try:
-            timestamps = pd.to_datetime(df[col], format='mixed')
-            timestamps = timestamps.dropna()
+            timestamps_series = pd.Series(timestamps)
+            timestamps_series = timestamps_series.dropna()
 
-            if len(timestamps) == 0:
+            if len(timestamps_series) == 0:
                 continue
 
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
             # Hourly distribution
-            hourly_counts = timestamps.dt.hour.value_counts().sort_index()
+            hourly_counts = timestamps_series.dt.hour.value_counts().sort_index()
             ax1.bar(hourly_counts.index, hourly_counts.values, alpha=0.7)
-            ax1.set_title(f'{col} - Hourly Distribution')
-            ax1.set_xlabel('Hour of Day')
-            ax1.set_ylabel('Count')
+            ax1.set_title(f"{col} - Hourly Distribution")
+            ax1.set_xlabel("Hour of Day")
+            ax1.set_ylabel("Count")
             ax1.grid(True, alpha=0.3)
 
             # Daily distribution (if multiple days)
-            daily_counts = timestamps.dt.date.value_counts().sort_index()
+            daily_counts = timestamps_series.dt.date.value_counts().sort_index()
             if len(daily_counts) > 1:
                 ax2.bar(range(len(daily_counts)), daily_counts.values, alpha=0.7)
                 ax2.set_xticks(range(len(daily_counts)))
-                ax2.set_xticklabels([str(d) for d in daily_counts.index], rotation=45, ha='right')
-                ax2.set_title(f'{col} - Daily Distribution')
-                ax2.set_xlabel('Date')
-                ax2.set_ylabel('Count')
+                ax2.set_xticklabels(
+                    [str(d) for d in daily_counts.index], rotation=45, ha="right"
+                )
+                ax2.set_title(f"{col} - Daily Distribution")
+                ax2.set_xlabel("Date")
+                ax2.set_ylabel("Count")
                 ax2.grid(True, alpha=0.3)
             else:
                 # If only one day, show minute-by-minute
-                minute_counts = timestamps.dt.minute.value_counts().sort_index()
+                minute_counts = timestamps_series.dt.minute.value_counts().sort_index()
                 ax2.bar(minute_counts.index, minute_counts.values, alpha=0.7)
-                ax2.set_title(f'{col} - Per Minute Distribution')
-                ax2.set_xlabel('Minute')
-                ax2.set_ylabel('Count')
+                ax2.set_title(f"{col} - Per Minute Distribution")
+                ax2.set_xlabel("Minute")
+                ax2.set_ylabel("Count")
                 ax2.grid(True, alpha=0.3)
 
             plt.tight_layout()
-            plt.savefig(f"{output_dir}/{col}_temporal_analysis.png", dpi=300, bbox_inches='tight')
+            plt.savefig(
+                f"{output_dir}/{col}_temporal_analysis.png",
+                dpi=300,
+                bbox_inches="tight",
+            )
             plt.show()
 
             print(f"\n{col} Temporal Statistics:")
-            print(f"  Date range: {timestamps.min()} to {timestamps.max()}")
-            print(f"  Duration: {timestamps.max() - timestamps.min()}")
+            print(
+                f"  Date range: {timestamps_series.min()} to {timestamps_series.max()}"
+            )
+            print(f"  Duration: {timestamps_series.max() - timestamps_series.min()}")
 
         except Exception as e:
             print(f"Error processing {col}: {e}")
 
-def analyze_one_trace(file_path="/home/juncheng/workspace/prefix_cache/requests/gemma-3-27b-it.csv"):
+
+def analyze_one_trace(
+    file_path="/home/juncheng/workspace/prefix_cache/requests/gemma-3-27b-it.parquet",
+    chute_mapping=None,
+):
     """Analyze one trace"""
-    
+
     print("Loading data...")
-    trace_name = os.path.basename(file_path).split('.')[0]
-    df = load_data(file_path)
+    trace_name = os.path.basename(file_path).split(".")[0]
 
-    if df is None or df.empty:
-        print("No data to analyze")
-        return
+    # Load parquet file directly with pandas
+    if file_path.endswith('.parquet'):
+        df = pd.read_parquet(file_path)
+    else:
+        df = pd.read_csv(file_path)
 
-    print("\n" + "="*50)
+    # Apply column renaming based on MetricsRecord mappings
+    df.rename(columns=COLUMN_MAPPINGS, inplace=True)
+
+    print(f"Loaded dataframe with shape: {df.shape}")
+    print(f"Columns: {list(df.columns)}")
+
+    # Use provided chute mapping or load if not provided
+    if chute_mapping is None:
+        print("Loading chute to model mapping...")
+        chute_mapping = load_chute_to_model_mapping()
+
+    print("\n" + "=" * 50)
     print(f"ANALYZING METRICS DATA: {trace_name}")
-    print("="*50)
+    print("=" * 50)
 
     # Create output directory
     output_dir = f"figures/metrics_analysis/{trace_name}"
     os.makedirs(output_dir, exist_ok=True)
 
     # Analyze unique values
-    plot_unique_values_cdf(df, output_dir)
+    plot_unique_values_cdf(df, output_dir, chute_mapping)
 
     # Categorical distributions
-    plot_categorical_distributions(df, output_dir)
+    plot_categorical_distributions(df, output_dir, chute_mapping)
 
     # Numerical distributions
-    plot_numerical_distributions(df, output_dir)
+    plot_numerical_distributions(df, output_dir, chute_mapping)
 
     # Timestamp analysis
-    plot_timestamp_analysis(df, output_dir)
+    plot_timestamp_analysis(df, output_dir, chute_mapping)
 
     print("\nAnalysis complete! Plots saved to:", output_dir)
     print("Generated files:")
     for file in os.listdir(output_dir):
-        if file.endswith('.png'):
+        if file.endswith(".png"):
             print(f"  - {file}")
+
 
 def main():
     """Main function"""
+    # Load chute to model mapping once for all files
+    print("Loading chute to model mapping...")
+    chute_mapping = load_chute_to_model_mapping()
+
     file_path = "/home/juncheng/workspace/prefix_cache/data/metrics_30day/"
-    file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
+    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
+    file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.parquet"
+    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.parquet"
+    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.csv"
     if os.path.isdir(file_path):
         for file in os.listdir(file_path):
-            if file.endswith('.csv'):
-                analyze_one_trace(os.path.join(file_path, file))
+            if file.endswith(".parquet"):
+                analyze_one_trace(os.path.join(file_path, file), chute_mapping)
     else:
-        analyze_one_trace(file_path)
+        analyze_one_trace(file_path, chute_mapping)
+
 
 if __name__ == "__main__":
     main()

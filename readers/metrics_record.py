@@ -76,9 +76,9 @@ class MetricsRecord:
     model_name: Optional[str] = None
 
     # also called timestamp in 1day format
-    started_at: Optional[float] = None
+    started_at: Optional[datetime] = None
     # missing in 1day format
-    completed_at: Optional[float] = None
+    completed_at: Optional[datetime] = None
     # missing in 30day format but can be calculated from started_at and completed_at
     duration: Optional[float] = None
 
@@ -88,33 +88,45 @@ class MetricsRecord:
     @property
     def total_tokens(self) -> int:
         """Total tokens (input + output)"""
+        if self.input_tokens == -1 or self.output_tokens == -1:
+            return -1
         return self.input_tokens + self.output_tokens
 
     def __post_init__(self):
         """Validate required fields after initialization"""
-        if not self.chute_id:
+        if not self.chute_id or self.chute_id == "-1":
             raise ValueError("chute_id is required")
-        if self.input_tokens < 0 or self.output_tokens < 0:
-            raise ValueError("Token counts cannot be negative")
+        # Allow -1 as special value indicating missing data
+        if (self.input_tokens < 0 and self.input_tokens != -1) or (self.output_tokens < 0 and self.output_tokens != -1):
+            raise ValueError("Token counts cannot be negative (except -1 for missing data)")
         if self.started_at and self.completed_at:
-            self.duration = self.completed_at - self.started_at
+            self.duration = (self.completed_at - self.started_at).total_seconds()
         if (
             not self.completion_tps
             and self.duration is not None
             and self.input_tokens is not None
             and self.output_tokens is not None
+            and self.input_tokens != -1
+            and self.output_tokens != -1
         ):
             self.completion_tps = self.total_tokens / self.duration
         if self.chute_id:
             self.model_name = CHUTES_MODELS_MAP.get(self.chute_id, self.chute_id)
 
     def __str__(self):
-        return (
-            f"MetricsRecord(chute_id={self.chute_id}, model_name={self.model_name}, "
-            + f"input_tokens={self.input_tokens}, output_tokens={self.output_tokens}, "
-            + f"ttft={self.ttft}, duration={self.duration}, completion_tps={self.completion_tps}"
-            + f"started_at={self.started_at}, completed_at={self.completed_at})"
-        )
+        s = f"MetricsRecord({self.model_name}: input_tokens={self.input_tokens}, output_tokens={self.output_tokens}"
+        if self.ttft is not None:
+            s += f", ttft={self.ttft}s"
+        if self.duration is not None:
+            s += f", duration={self.duration}s"
+        if self.completion_tps is not None:
+            s += f", completion_tps={self.completion_tps}"
+        if self.started_at is not None:
+            s += f", started_at={self.started_at.isoformat()}"
+        if self.completed_at is not None:
+            s += f", completed_at={self.completed_at.isoformat()}"
+
+        return s
 
     def __repr__(self):
         return self.__str__()
@@ -126,8 +138,8 @@ if __name__ == "__main__":
             chute_id="14a91d88-d6d6-5046-aaf4-eb3ad96b7247",
             input_tokens=100,
             output_tokens=200,
-            started_at=1714857600,
-            completed_at=1714857601,
+            started_at=datetime(2024, 5, 1, 0, 0, 0),
+            completed_at=datetime(2024, 5, 1, 0, 0, 1),
             duration=1,
             completion_tps=100,
         )
