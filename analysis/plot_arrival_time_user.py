@@ -16,6 +16,7 @@ Creates and saves boxplot by default, use --summary for additional statistical p
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
 
@@ -25,8 +26,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.plot import setup_plot_style
 
 setup_plot_style()
-
-import matplotlib.pyplot as plt
 
 
 def load_and_process_data_per_user(filepath, min_requests_per_user=5):
@@ -269,7 +268,7 @@ def main():
     print("\nOverall Inter-Arrival Time Statistics:")
     print(df['inter_arrival_time'].describe())
 
-    print(f"\nUser Statistics:")
+    print("\nUser Statistics:")
     user_counts = df['user_id'].value_counts()
     print(f"Total users analyzed: {len(user_counts)}")
     print(f"Average requests per user: {user_counts.mean():.1f}")

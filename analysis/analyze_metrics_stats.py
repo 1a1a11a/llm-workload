@@ -86,13 +86,11 @@ def plot_unique_values_cdf(df, output_dir="figures"):
 
     columns = list(column_stats.keys())
     unique_counts = [column_stats[col]["unique"] for col in columns]
-    uniqueness_ratios = [column_stats[col]["uniqueness_ratio"] for col in columns]
 
     # Sort by unique count
     sorted_indices = np.argsort(unique_counts)
     sorted_columns = [columns[i] for i in sorted_indices]
     sorted_uniques = [unique_counts[i] for i in sorted_indices]
-    sorted_ratios = [uniqueness_ratios[i] for i in sorted_indices]
 
     # Plot unique counts
     ax.bar(range(len(sorted_columns)), sorted_uniques, alpha=0.7, label="Unique Values")

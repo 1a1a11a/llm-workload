@@ -15,6 +15,7 @@ Creates and saves CDF, boxplot, and correlation plots automatically (no display)
 
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
 
@@ -25,8 +26,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.plot import setup_plot_style
 
 setup_plot_style()
-
-import matplotlib.pyplot as plt
 
 
 def load_and_process_data(filepath):
