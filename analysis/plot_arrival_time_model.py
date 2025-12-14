@@ -4,13 +4,13 @@ Inter-Arrival Time Analysis Script
 
 This script analyzes the inter-arrival times of requests across all users
 by plotting the time differences between consecutive requests as a CDF, boxplot by hour,
-and correlation between consecutive inter-arrival times.
+daily boxplot, and correlation between consecutive inter-arrival times.
 
 Usage:
     python plot_arrival_time_model.py /path/to/metrics.csv
     python plot_arrival_time_model.py ../data/metrics_30day/DeepSeek-R1.csv --output plots
 
-Creates and saves CDF, boxplot, and correlation plots automatically (no display).
+Creates and saves CDF, boxplot, daily boxplot, and correlation plots automatically (no display).
 """
 
 import pandas as pd
@@ -18,6 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
+from scipy.stats import spearmanr
 
 import os
 import sys
@@ -41,8 +42,19 @@ def load_and_process_data(filepath):
     # Read CSV
     df = pd.read_csv(filepath)
 
-    # Convert started_at to datetime
-    df["started_at"] = pd.to_datetime(df["started_at"], format="mixed")
+    # Determine which timestamp column is available
+    timestamp_col = None
+    if "started_at" in df.columns:
+        timestamp_col = "started_at"
+    elif "timestamp" in df.columns:
+        timestamp_col = "timestamp"
+    else:
+        raise ValueError(
+            "No timestamp column found. Expected 'started_at' or 'timestamp' column."
+        )
+
+    # Convert timestamp to datetime
+    df["started_at"] = pd.to_datetime(df[timestamp_col], format="mixed")
 
     # Sort by started_at to ensure chronological order
     df = df.sort_values("started_at").reset_index(drop=True)
@@ -50,8 +62,9 @@ def load_and_process_data(filepath):
     # Calculate inter-arrival times (in seconds)
     df["inter_arrival_time"] = df["started_at"].diff().dt.total_seconds()
 
-    # Extract hour for grouping
+    # Extract hour and day for grouping
     df["hour"] = df["started_at"].dt.hour
+    df["date"] = df["started_at"].dt.date
 
     # Remove the first row (which will have NaN for inter_arrival_time)
     df = df.dropna(subset=["inter_arrival_time"])
@@ -139,28 +152,37 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
             hour_labels.append(f"{hour:02d}:00")
             positions.append(hour)
 
-    # Create boxplot with custom positions
-    bp = plt.boxplot(hourly_data, patch_artist=True, positions=positions)
+    # Create boxplot with custom positions and show means
+    bp = plt.boxplot(hourly_data, patch_artist=True, positions=positions, showmeans=True, meanline=True)
 
     # Set custom tick labels
     plt.xticks(positions, hour_labels, rotation=45)
 
     # Customize boxplot colors
-    for patch in bp['boxes']:
-        patch.set_facecolor('lightblue')
+    for patch in bp["boxes"]:
+        patch.set_facecolor("lightblue")
         patch.set_alpha(0.7)
 
-    for whisker in bp['whiskers']:
-        whisker.set(color='blue', linewidth=1.5)
+    for whisker in bp["whiskers"]:
+        whisker.set(color="blue", linewidth=1.5)
 
-    for cap in bp['caps']:
-        cap.set(color='blue', linewidth=1.5)
+    for cap in bp["caps"]:
+        cap.set(color="blue", linewidth=1.5)
 
-    for median in bp['medians']:
-        median.set(color='red', linewidth=2)
+    for median in bp["medians"]:
+        median.set(color="red", linewidth=2)
 
-    for flier in bp['fliers']:
-        flier.set(marker='o', color='red', alpha=0.5)
+    for flier in bp["fliers"]:
+        flier.set(marker="o", color="red", alpha=0.5)
+
+    # Customize mean lines to be visually distinct
+    for mean in bp["means"]:
+        mean.set(color="green", linewidth=3)
+        mean.set_alpha(0.8)
+
+    # Add means label to legend
+    plt.plot([], [], color="green", linewidth=3, label="Mean")
+    plt.legend(loc="upper right")
 
     # Add labels and title
     plt.xlabel("Hour of Day")
@@ -168,13 +190,13 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
     plt.title(f"{title}\n(n={len(df):,})", pad=20)
 
     # Use log scale for y-axis
-    plt.yscale('log')
+    plt.yscale("log")
 
     # Rotate x-axis labels for better readability
     plt.xticks(rotation=45)
 
     # Add grid
-    plt.grid(True, alpha=0.3, axis='y')
+    plt.grid(True, alpha=0.3, axis="y")
 
     # Add statistics text
     hours_with_data = df["hour"].nunique()
@@ -182,11 +204,15 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
     Hours with data: {hours_with_data}
     Total requests: {len(df) + 1}
     """
-    plt.text(0.02, 0.98, stats_text.strip(),
-             transform=plt.gca().transAxes,
-             verticalalignment='top',
-             fontsize=10,
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    plt.text(
+        0.02,
+        0.98,
+        stats_text.strip(),
+        transform=plt.gca().transAxes,
+        verticalalignment="top",
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    )
 
     plt.tight_layout()
 
@@ -194,9 +220,117 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
     print(f"Boxplot saved to {save_path}")
 
 
-def plot_inter_arrival_correlation(df, title="Inter-Arrival Correlation", save_path=None):
+def plot_daily_boxplot(df, title="Inter-Arrival Times by Day", save_path=None):
+    """
+    Plot inter-arrival times as a boxplot grouped by day.
+
+    Args:
+        df (pd.DataFrame): DataFrame with 'inter_arrival_time' and 'date' columns
+        title (str): Plot title
+        save_path (str): Path to save the plot
+    """
+    plt.figure(figsize=(16, 8))
+
+    # Group data by date and prepare for boxplot
+    daily_groups = df.groupby("date")["inter_arrival_time"]
+
+    # Sort dates chronologically
+    sorted_dates = sorted(daily_groups.groups.keys())
+
+    # Only include dates that have data
+    daily_data = []
+    date_labels = []
+    positions = []
+
+    for i, date in enumerate(sorted_dates):
+        daily_data.append(daily_groups.get_group(date).values)
+        date_labels.append(str(date))
+        positions.append(i)
+
+    # Create boxplot with custom positions and show means
+    bp = plt.boxplot(daily_data, patch_artist=True, positions=positions, showmeans=True, meanline=True)
+
+    # Set custom tick labels - show every nth date if too many
+    n_dates = len(date_labels)
+    step = max(1, n_dates // 10)  # Show approximately 10 x-axis labels
+    tick_positions = positions[::step]
+    tick_labels = date_labels[::step]
+
+    plt.xticks(tick_positions, tick_labels, rotation=45)
+
+    # Customize boxplot colors
+    colors = plt.cm.Set3(np.linspace(0, 1, len(daily_data)))
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
+
+    for whisker in bp["whiskers"]:
+        whisker.set(color="gray", linewidth=1.5)
+
+    for cap in bp["caps"]:
+        cap.set(color="gray", linewidth=1.5)
+
+    for median in bp["medians"]:
+        median.set(color="red", linewidth=2)
+
+    for flier in bp["fliers"]:
+        flier.set(marker="o", color="red", alpha=0.5)
+
+    # Customize mean lines to be visually distinct
+    for mean in bp["means"]:
+        mean.set(color="green", linewidth=3)
+        mean.set_alpha(0.8)
+
+    # Add means label to legend
+    plt.plot([], [], color="green", linewidth=3, label="Mean")
+    plt.legend(loc="upper right")
+
+    # Add labels and title
+    plt.xlabel("Date")
+    plt.ylabel("Inter-Arrival Time (seconds)")
+    plt.title(f"{title}\n(n={len(df):,})", pad=20)
+
+    # Use log scale for y-axis
+    plt.yscale("log")
+
+    # Rotate x-axis labels for better readability
+    plt.xticks(rotation=45)
+
+    # Add grid
+    plt.grid(True, alpha=0.3, axis="y")
+
+    # Add statistics text
+    dates_with_data = df["date"].nunique()
+    date_range = f"{df['date'].min()} to {df['date'].max()}"
+    stats_text = f"""
+    Date range: {date_range}
+    Days with data: {dates_with_data}
+    Total requests: {len(df) + 1}
+    """
+    plt.text(
+        0.02,
+        0.98,
+        stats_text.strip(),
+        transform=plt.gca().transAxes,
+        verticalalignment="top",
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    )
+
+    plt.tight_layout()
+
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"Daily boxplot saved to {save_path}")
+
+
+def plot_inter_arrival_correlation(
+    df, title="Inter-Arrival Correlation", save_path=None
+):
     """
     Plot correlation between consecutive inter-arrival times.
+
+    Calculates and displays both Pearson and Spearman correlation coefficients
+    to provide comprehensive correlation analysis.
 
     Args:
         df (pd.DataFrame): DataFrame with 'inter_arrival_time' column
@@ -206,7 +340,7 @@ def plot_inter_arrival_correlation(df, title="Inter-Arrival Correlation", save_p
     plt.figure(figsize=(12, 8))
 
     # Get consecutive pairs of inter-arrival times
-    inter_arrivals = df['inter_arrival_time'].values
+    inter_arrivals = df["inter_arrival_time"].values
 
     if len(inter_arrivals) < 2:
         print("Not enough data points for correlation analysis")
@@ -216,46 +350,77 @@ def plot_inter_arrival_correlation(df, title="Inter-Arrival Correlation", save_p
     current = inter_arrivals[:-1]  # All except last
     next_arrival = inter_arrivals[1:]  # All except first
 
-    # Calculate correlation
-    correlation = np.corrcoef(current, next_arrival)[0, 1]
+    # Calculate both Pearson and Spearman correlations
+    pearson_corr = np.corrcoef(current, next_arrival)[0, 1]
+    spearman_corr, spearman_p_value = spearmanr(current, next_arrival)
 
     # Create scatter plot
-    plt.scatter(current, next_arrival, alpha=0.6, s=30, c='blue', edgecolors='black', linewidth=0.5)
+    plt.scatter(
+        current,
+        next_arrival,
+        alpha=0.6,
+        s=30,
+        c="blue",
+        edgecolors="black",
+        linewidth=0.5,
+    )
 
     # Add diagonal line (y=x) to show perfect correlation
     max_val = max(current.max(), next_arrival.max())
     min_val = min(current.min(), next_arrival.min())
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.7, linewidth=2, label='Perfect correlation (y=x)')
+    plt.plot(
+        [min_val, max_val],
+        [min_val, max_val],
+        "r--",
+        alpha=0.7,
+        linewidth=2,
+        label="Perfect correlation (y=x)",
+    )
 
     # Add labels and title
     plt.xlabel("Current Inter-Arrival Time (seconds)")
     plt.ylabel("Next Inter-Arrival Time (seconds)")
     plt.title(f"{title} - Consecutive Pairs\n(n={len(current):,})", pad=20)
 
+    # Add large, prominent correlation coefficients at the top
+    correlation_text = f"Pearson: {pearson_corr:.4f} | Spearman: {spearman_corr:.4f}"
+    plt.text(0.5, 0.95, correlation_text,
+             transform=plt.gca().transAxes,
+             horizontalalignment='center',
+             fontsize=16,
+             fontweight='bold',
+             bbox=dict(boxstyle="round,pad=0.5", facecolor='yellow', alpha=0.8, edgecolor='black', linewidth=2))
+
     # Use log scale for both axes
-    plt.xscale('log')
-    plt.yscale('log')
+    plt.xscale("log")
+    plt.yscale("log")
 
     # Add grid
     plt.grid(True, alpha=0.3)
 
-    # Add correlation coefficient and statistics
+    # Add detailed statistics (smaller since we have the large correlation above)
     stats_text = f"""
-    Correlation: {correlation:.3f}
     Total pairs: {len(current):,}
     Mean current: {current.mean():,.3f}s
     Mean next: {next_arrival.mean():,.3f}s
+    Std current: {current.std():,.3f}s
+    Std next: {next_arrival.std():,.3f}s
+    Spearman p-value: {spearman_p_value:.2e}
     """
 
     # Position stats box in top-left
-    plt.text(0.02, 0.98, stats_text.strip(),
-             transform=plt.gca().transAxes,
-             verticalalignment='top',
-             fontsize=10,
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    plt.text(
+        0.02,
+        0.98,
+        stats_text.strip(),
+        transform=plt.gca().transAxes,
+        verticalalignment="top",
+        fontsize=9,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    )
 
     # Add legend
-    plt.legend(loc='lower right')
+    plt.legend(loc="lower right")
 
     plt.tight_layout()
 
@@ -282,9 +447,12 @@ def main():
     print(df["inter_arrival_time"].describe())
 
     trace_name = os.path.basename(args.file).split(".")[0]
-    
+
     # Create plots
-    output_dir = args.output or "figures/arrival_time/small/"
+    if "/small/" in args.file:
+        output_dir = args.output or "figures/arrival_time/small/"
+    else:
+        output_dir = args.output or "figures/arrival_time/"
     Path(output_dir).mkdir(exist_ok=True)
 
     base_title = "Inter-Arrival Times"
@@ -299,9 +467,17 @@ def main():
     boxplot_path = Path(output_dir) / f"{trace_name}_inter_arrival_boxplot.png"
     plot_hourly_boxplot(df, title=base_title, save_path=str(boxplot_path))
 
+    # Boxplot by day (always created)
+    daily_boxplot_path = (
+        Path(output_dir) / f"{trace_name}_inter_arrival_daily_boxplot.png"
+    )
+    plot_daily_boxplot(df, title=base_title, save_path=str(daily_boxplot_path))
+
     # Correlation between consecutive inter-arrivals
     correlation_path = Path(output_dir) / f"{trace_name}_inter_arrival_correlation.png"
-    plot_inter_arrival_correlation(df, title=base_title, save_path=str(correlation_path))
+    plot_inter_arrival_correlation(
+        df, title=base_title, save_path=str(correlation_path)
+    )
 
 
 if __name__ == "__main__":
