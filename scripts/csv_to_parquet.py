@@ -15,6 +15,7 @@ Dependencies:
     pyarrow or fastparquet
 """
 
+import sys
 import argparse
 import glob
 import logging
@@ -25,15 +26,9 @@ from typing import List, Optional
 
 import pandas as pd
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from readers.data_loader import COLUMN_MAPPINGS
 
-from readers.metrics_record import COLUMN_MAPPINGS
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
@@ -56,19 +51,19 @@ def csv_to_parquet(csv_path: str, parquet_path: Optional[str] = None) -> bool:
         # Generate output path if not provided
         if parquet_path is None:
             csv_path_obj = Path(csv_path)
-            parquet_path = str(csv_path_obj.with_suffix('.parquet'))
+            parquet_path = str(csv_path_obj.with_suffix(".parquet"))
 
         logger.info(f"Converting {csv_path} -> {parquet_path}")
 
         # Read CSV file
         # Try different encodings if UTF-8 fails
-        encodings_to_try = ['utf-8', 'utf-8-sig', 'latin1', 'cp1252']
+        encodings_to_try = ["utf-8", "utf-8-sig", "latin1", "cp1252"]
         df = None
 
         for encoding in encodings_to_try:
             try:
                 df = pd.read_csv(csv_path, encoding=encoding)
-                if encoding != 'utf-8':
+                if encoding != "utf-8":
                     logger.info(f"Used encoding: {encoding}")
                 break
             except UnicodeDecodeError:
@@ -86,7 +81,7 @@ def csv_to_parquet(csv_path: str, parquet_path: Optional[str] = None) -> bool:
         df = df.rename(columns=COLUMN_MAPPINGS)
 
         # Validate that we have the expected columns (at minimum the required ones from MetricsRecord)
-        required_columns = ['chute_id', 'input_tokens', 'output_tokens']
+        required_columns = ["chute_id", "input_tokens", "output_tokens"]
         missing_required = [col for col in required_columns if col not in df.columns]
         if missing_required:
             logger.error(f"Missing required columns: {missing_required}")
@@ -98,8 +93,16 @@ def csv_to_parquet(csv_path: str, parquet_path: Optional[str] = None) -> bool:
 
         # Log any columns that are not in the standard MetricsRecord fields
         standard_fields = {
-            'chute_id', 'input_tokens', 'output_tokens', 'ttft', 'function_name',
-            'user_id', 'started_at', 'completed_at', 'duration', 'completion_tps'
+            "chute_id",
+            "input_tokens",
+            "output_tokens",
+            "ttft",
+            "function_name",
+            "user_id",
+            "started_at",
+            "completed_at",
+            "duration",
+            "completion_tps",
         }
         extra_columns = [col for col in df.columns if col not in standard_fields]
         if extra_columns:
@@ -183,36 +186,26 @@ Examples:
 
   # Convert all CSV files recursively
   python csv_to_parquet.py --dir data/ --recursive
-        """
+        """,
     )
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        'input_file',
-        nargs='?',
-        help='Input CSV file path'
-    )
-    group.add_argument(
-        '--dir',
-        help='Directory containing CSV files to convert'
-    )
+    group.add_argument("input_file", nargs="?", help="Input CSV file path")
+    group.add_argument("--dir", help="Directory containing CSV files to convert")
 
     parser.add_argument(
-        'output_file',
-        nargs='?',
-        help='Output Parquet file path (optional, defaults to input_file.parquet)'
+        "output_file",
+        nargs="?",
+        help="Output Parquet file path (optional, defaults to input_file.parquet)",
     )
     parser.add_argument(
-        '--recursive',
-        '-r',
-        action='store_true',
-        help='Process subdirectories recursively when using --dir'
+        "--recursive",
+        "-r",
+        action="store_true",
+        help="Process subdirectories recursively when using --dir",
     )
     parser.add_argument(
-        '--verbose',
-        '-v',
-        action='store_true',
-        help='Enable verbose logging'
+        "--verbose", "-v", action="store_true", help="Enable verbose logging"
     )
 
     args = parser.parse_args()
