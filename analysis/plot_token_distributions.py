@@ -1,27 +1,112 @@
 #!/usr/bin/env python3
 """Token usage distribution analysis script
 
-Plot token distributions for metrics traces using data_loader.
+Plot token distributions for metrics traces.
+Reads CSV files line-by-line in parallel to minimize memory usage.
 """
 
 import argparse
+import csv
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
-from readers.data_loader import load_metrics_dataframe
 from utils.plot import setup_plot_style
 
 
-def _load_records(csv_path: str) -> pd.DataFrame:
-    """Load all metrics records from the given CSV path using data_loader."""
-    return load_metrics_dataframe(csv_path, apply_transforms=True)
+def _read_tokens_from_csv(csv_path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Read input_tokens and output_tokens from CSV line by line.
+    
+    Returns:
+        Tuple of (input_tokens, output_tokens) as numpy arrays
+    """
+    print(f"    Counting valid records in {csv_path}...", flush=True)
+    
+    # First pass: count valid records
+    valid_count = 0
+    with open(csv_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row.get('input_tokens') and row.get('output_tokens'):
+                valid_count += 1
+    
+    if valid_count == 0:
+        return np.array([], dtype=np.int32), np.array([], dtype=np.int32)
+    
+    print(f"    Reading {valid_count:,} records from {csv_path}...", flush=True)
+    
+    # Second pass: pre-allocate arrays and fill
+    input_tokens = np.empty(valid_count, dtype=np.int32)
+    output_tokens = np.empty(valid_count, dtype=np.int32)
+    
+    idx = 0
+    with open(csv_path, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if not row.get('input_tokens') or not row.get('output_tokens'):
+                continue
+            input_tokens[idx] = int(row['input_tokens'])
+            output_tokens[idx] = int(row['output_tokens'])
+            idx += 1
+    
+    print(f"    Done reading {csv_path}", flush=True)
+    return input_tokens, output_tokens
+
+
+def _process_single_csv(args: Tuple[str, str]) -> Tuple[str, np.ndarray, np.ndarray]:
+    """Process a single CSV file and return model_name, input_tokens, output_tokens.
+    
+    This function is used for parallel processing.
+    """
+    csv_file, model_name = args
+    input_tokens, output_tokens = _read_tokens_from_csv(csv_file)
+    return model_name, input_tokens, output_tokens
+
+
+def _plot_single_model(args: Tuple[str, np.ndarray, str, str, str, bool]) -> str:
+    """Plot a single model's CDF. Used for parallel processing.
+    
+    Returns:
+        Path to the saved plot
+    """
+    model_name, data, title, xlabel, output_dir, logx = args
+    
+    if data is None or len(data) == 0:
+        return ""
+    
+    plt.figure(figsize=(12, 8))
+    sorted_data = np.sort(data)
+    y_values = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
+    
+    plt.plot(
+        sorted_data,
+        y_values,
+        label=f"{model_name} (n={len(data):,})",
+        linewidth=3,
+        alpha=0.8,
+        linestyle="-",
+        color=plt.cm.tab10.colors[0],
+    )
+
+    plt.title(f"{title} - {model_name}", pad=20)
+    plt.xlabel(xlabel)
+    plt.ylabel("Cumulative Probability Distribution (CDF)")
+    if logx:
+        plt.xscale("log")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    
+    output_file = os.path.join(output_dir, f"{model_name.replace('/', '_')}_cdf.png")
+    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    plt.close()
+    return output_file
 
 
 def plot_cdf(
@@ -73,42 +158,24 @@ def plot_cdf_individual(
     output_dir: str,
     logx: bool = True,
 ) -> None:
-    """Plot individual CDFs for each model in separate figures."""
-    line_styles = ["-", "--", "-.", ":", "-", "--", "-.", ":", "-", "--", "-.", ":"]
-    colors = tuple(plt.cm.tab10.colors + plt.cm.Set1.colors)
+    """Plot individual CDFs for each model in separate figures (parallelized)."""
+    # Prepare arguments for parallel processing
+    plot_args = [
+        (model_name, data, title, xlabel, output_dir, logx)
+        for model_name, data in data_dict.items()
+        if data is not None and len(data) > 0
+    ]
     
-    for model_name, data in data_dict.items():
-        if data is None or len(data) == 0:
-            continue
-            
-        plt.figure(figsize=(12, 8))
-        sorted_data = np.sort(data)
-        y_values = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
-        line_style = line_styles[0]  # Use same style for all individual plots
-        color = colors[0]  # Use same color for all individual plots
-        plt.plot(
-            sorted_data,
-            y_values,
-            label=f"{model_name} (n={len(data):,})",
-            linewidth=3,
-            alpha=0.8,
-            linestyle=line_style,
-            color=color,
-        )
-
-        plt.title(f"{title} - {model_name}", pad=20)
-        plt.xlabel(xlabel)
-        plt.ylabel("Cumulative Probability Distribution (CDF)")
-        if logx:
-            plt.xscale("log")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        
-        output_file = os.path.join(output_dir, f"{model_name.replace('/', '_')}_cdf.png")
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
-        plt.close()
-        print(f"Saved individual plot: {output_file}")
+    if not plot_args:
+        return
+    
+    # Plot in parallel
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(_plot_single_model, args) for args in plot_args]
+        for future in as_completed(futures):
+            output_file = future.result()
+            if output_file:
+                print(f"Saved individual plot: {output_file}")
 
 
 def main(
@@ -132,35 +199,35 @@ def main(
     ratio_data: Dict[str, np.ndarray] = {}
 
     total_records = 0
-    for csv_file, model_name in zip(csv_files, model_names):
-        records = _load_records(csv_file)
-        if records.empty:
-            print(f"  -> No records found in {csv_file}")
-            continue
+    
+    # Read files in parallel
+    print(f"Reading {len(csv_files)} file(s) in parallel...")
+    with ProcessPoolExecutor() as executor:
+        # Submit all CSV reading jobs
+        future_to_csv = {
+            executor.submit(_process_single_csv, (csv_file, model_name)): csv_file
+            for csv_file, model_name in zip(csv_files, model_names)
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_csv):
+            csv_file = future_to_csv[future]
+            model_name, input_tokens, output_tokens = future.result()
+            
+            if len(input_tokens) == 0:
+                print(f"  -> No token data found in {csv_file}")
+                continue
 
-        total_records += len(records)
-        
-        # Extract all token data from this file (treating the entire file as one model)
-        input_tokens: List[int] = []
-        output_tokens: List[int] = []
-        
-        for record in records.itertuples():
-            input_tokens.append(record.input_tokens)
-            output_tokens.append(record.output_tokens)
-
-        if not input_tokens:
-            print(f"  -> No token data found in {csv_file}")
-            continue
-
-        input_tokens_data[model_name] = np.array(input_tokens)
-        output_tokens_data[model_name] = np.array(output_tokens)
-        
-        # Calculate output/input ratio for positive input tokens only
-        positive_mask = np.array(input_tokens) > 0
-        if np.any(positive_mask):
-            ratio_data[model_name] = np.array(output_tokens)[positive_mask] / np.array(input_tokens)[positive_mask]
-        
-        print(f"  -> {model_name}: {len(input_tokens)} samples from {os.path.basename(csv_file)}")
+            total_records += len(input_tokens)
+            input_tokens_data[model_name] = input_tokens
+            output_tokens_data[model_name] = output_tokens
+            
+            # Calculate output/input ratio for positive input tokens only
+            positive_mask = input_tokens > 0
+            if np.any(positive_mask):
+                ratio_data[model_name] = output_tokens[positive_mask] / input_tokens[positive_mask]
+            
+            print(f"  -> {model_name}: {len(input_tokens):,} samples from {os.path.basename(csv_file)}")
 
     if not input_tokens_data:
         raise RuntimeError("No token data available from any file")
