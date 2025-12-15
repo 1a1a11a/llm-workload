@@ -84,6 +84,51 @@ def plot_cdf(
     print(f"Saved: {output_file}")
 
 
+def plot_cdf_individual(
+    data_dict: Dict[str, np.ndarray],
+    title: str,
+    xlabel: str,
+    output_dir: str,
+    logx: bool = True,
+) -> None:
+    """Plot individual CDFs for each model in separate figures."""
+    line_styles = ["-", "--", "-.", ":", "-", "--", "-.", ":", "-", "--", "-.", ":"]
+    colors = tuple(plt.cm.tab10.colors + plt.cm.Set1.colors)
+    
+    for model_name, data in data_dict.items():
+        if data is None or len(data) == 0:
+            continue
+            
+        plt.figure(figsize=(12, 8))
+        sorted_data = np.sort(data)
+        y_values = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
+        line_style = line_styles[0]  # Use same style for all individual plots
+        color = colors[0]  # Use same color for all individual plots
+        plt.plot(
+            sorted_data,
+            y_values,
+            label=f"{model_name} (n={len(data):,})",
+            linewidth=3,
+            alpha=0.8,
+            linestyle=line_style,
+            color=color,
+        )
+
+        plt.title(f"{title} - {model_name}", pad=20)
+        plt.xlabel(xlabel)
+        plt.ylabel("Cumulative Probability Distribution (CDF)")
+        if logx:
+            plt.xscale("log")
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.tight_layout()
+        
+        output_file = os.path.join(output_dir, f"{model_name.replace('/', '_')}_cdf.png")
+        plt.savefig(output_file, dpi=300, bbox_inches="tight")
+        plt.close()
+        print(f"Saved individual plot: {output_file}")
+
+
 def _select_models(
     records: pd.DataFrame, requested: Optional[List[str]], limit: int
 ) -> List[str]:
@@ -139,38 +184,69 @@ def main(
     output_path.mkdir(parents=True, exist_ok=True)
     print(output_path)
 
-    print("\nCreating input tokens CDF plot...")
+    # Create combined plots for all models
+    print("\nCreating combined input tokens CDF plot...")
     plot_cdf(
+        input_tokens_data,
+        "Input Tokens Distribution (All Models)",
+        "Input Tokens",
+        str(output_path / "input_tokens_cdf_combined.png"),
+    )
+
+    print("Creating combined output tokens CDF plot...")
+    plot_cdf(
+        output_tokens_data,
+        "Output Tokens Distribution (All Models)",
+        "Output Tokens",
+        str(output_path / "output_tokens_cdf_combined.png"),
+    )
+
+    print("Creating combined output/input ratio CDF plot...")
+    plot_cdf(
+        ratio_data,
+        "Output/Input Token Distribution (All Models)",
+        "Output/Input Ratio",
+        str(output_path / "input_output_ratio_cdf_combined.png"),
+        # logx=False,
+    )
+
+    # Create individual plots for each model
+    print("\nCreating individual plots for each model...")
+    individual_output_path = output_path / "individual"
+    individual_output_path.mkdir(exist_ok=True)
+    
+    plot_cdf_individual(
         input_tokens_data,
         "Input Tokens Distribution",
         "Input Tokens",
-        str(output_path / "input_tokens_cdf.png"),
+        str(individual_output_path),
     )
 
-    print("Creating output tokens CDF plot...")
-    plot_cdf(
+    plot_cdf_individual(
         output_tokens_data,
         "Output Tokens Distribution",
         "Output Tokens",
-        str(output_path / "output_tokens_cdf.png"),
+        str(individual_output_path),
     )
 
-    print("Creating output/input ratio CDF plot...")
-    plot_cdf(
+    plot_cdf_individual(
         ratio_data,
         "Output/Input Token Distribution",
         "Output/Input Ratio",
-        str(output_path / "input_output_ratio_cdf.png"),
+        str(individual_output_path),
         # logx=False,
     )
 
     print("\nPlotting complete! Outputs saved to:")
     for filename in (
-        "input_tokens_cdf.png",
-        "output_tokens_cdf.png",
-        "input_output_ratio_cdf.png",
+        "input_tokens_cdf_combined.png",
+        "output_tokens_cdf_combined.png",
+        "input_output_ratio_cdf_combined.png",
     ):
         print(f"- {output_path / filename}")
+    
+    print("Individual plots saved to:")
+    print(f"- {individual_output_path}")
 
 
 if __name__ == "__main__":

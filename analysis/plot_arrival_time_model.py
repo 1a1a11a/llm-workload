@@ -153,7 +153,13 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
             positions.append(hour)
 
     # Create boxplot with custom positions and show means
-    bp = plt.boxplot(hourly_data, patch_artist=True, positions=positions, showmeans=True, meanline=True)
+    bp = plt.boxplot(
+        hourly_data,
+        patch_artist=True,
+        positions=positions,
+        showmeans=True,
+        meanline=True,
+    )
 
     # Set custom tick labels
     plt.xticks(positions, hour_labels, rotation=45)
@@ -248,7 +254,13 @@ def plot_daily_boxplot(df, title="Inter-Arrival Times by Day", save_path=None):
         positions.append(i)
 
     # Create boxplot with custom positions and show means
-    bp = plt.boxplot(daily_data, patch_artist=True, positions=positions, showmeans=True, meanline=True)
+    bp = plt.boxplot(
+        daily_data,
+        patch_artist=True,
+        positions=positions,
+        showmeans=True,
+        meanline=True,
+    )
 
     # Set custom tick labels - show every nth date if too many
     n_dates = len(date_labels)
@@ -384,12 +396,22 @@ def plot_inter_arrival_correlation(
 
     # Add large, prominent correlation coefficients at the top
     correlation_text = f"Pearson: {pearson_corr:.4f} | Spearman: {spearman_corr:.4f}"
-    plt.text(0.5, 0.95, correlation_text,
-             transform=plt.gca().transAxes,
-             horizontalalignment='center',
-             fontsize=16,
-             fontweight='bold',
-             bbox=dict(boxstyle="round,pad=0.5", facecolor='yellow', alpha=0.8, edgecolor='black', linewidth=2))
+    plt.text(
+        0.5,
+        0.95,
+        correlation_text,
+        transform=plt.gca().transAxes,
+        horizontalalignment="center",
+        fontsize=16,
+        fontweight="bold",
+        bbox=dict(
+            boxstyle="round,pad=0.5",
+            facecolor="yellow",
+            alpha=0.8,
+            edgecolor="black",
+            linewidth=2,
+        ),
+    )
 
     # Use log scale for both axes
     plt.xscale("log")
@@ -428,107 +450,125 @@ def plot_inter_arrival_correlation(
     print(f"Correlation plot saved to {save_path}")
 
 
-def plot_inter_arrival_heatmap(df, title="Inter-Arrival Time Probability Heatmap", save_path=None):
+def plot_inter_arrival_heatmap(
+    df, title="Inter-Arrival Time Probability Heatmap", save_path=None
+):
     """
     Create a heatmap showing the probability distribution of current vs next inter-arrival times.
-    
+
     Uses 2D histogram to show joint probability density with log-scale in milliseconds.
-    
+
     Args:
         df (pd.DataFrame): DataFrame with 'inter_arrival_time' column
         title (str): Plot title
         save_path (str): Path to save the plot
     """
     plt.figure(figsize=(12, 10))
-    
+
     # Get consecutive pairs of inter-arrival times
-    inter_arrivals = df['inter_arrival_time'].values
-    
+    inter_arrivals = df["inter_arrival_time"].values
+
     if len(inter_arrivals) < 2:
         print("Not enough data points for heatmap analysis")
         return
-    
+
     # set minimum inter-arrival time to avoid log(0)
     inter_arrivals = np.maximum(inter_arrivals, 1e-2)  # 10 ms minimum
     inter_arrivals = np.minimum(inter_arrivals, 1e4)  # 10000 seconds maximum
-    
+
     # Create pairs: (current, next)
     current = inter_arrivals[:-1]  # All except last
     next_arrival = inter_arrivals[1:]  # All except first
-    
+
     # Convert to milliseconds for better readability
     current_ms = current * 1000
     next_arrival_ms = next_arrival * 1000
-    
+
     print(f"Processing {len(current_ms)} points for heatmap.")
-    
+
     # Create 2D histogram (probability density)
     # Use log scale for better visualization
     current_log = np.log10(current_ms + 1e-6)  # Add small value to avoid log(0)
     next_log = np.log10(next_arrival_ms + 1e-6)
-    
+
     # Create bins for the heatmap
     bins = 50
     hist, xedges, yedges = np.histogram2d(current_log, next_log, bins=bins)
-    
+
     # Convert to probability density (normalize)
     hist = hist / hist.sum()
-    
+
     # Create heatmap
     extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
-    im = plt.imshow(hist.T, origin='lower', extent=extent,
-                    cmap='viridis', aspect='auto', interpolation='bilinear')
-    
+    im = plt.imshow(
+        hist.T,
+        origin="lower",
+        extent=extent,
+        cmap="viridis",
+        aspect="auto",
+        interpolation="bilinear",
+    )
+
     # Set custom tick labels (convert back from log scale)
     def format_time_label(value):
         if value == int(value):
             return f"{int(10**value)}"
         else:
             return f"{10**value:.1f}"
-    
+
     # Set ticks at log scale intervals
     log_ticks = np.arange(int(current_log.min()), int(current_log.max()) + 1)
-    
+
     plt.xticks(log_ticks, [format_time_label(t) for t in log_ticks])
     plt.yticks(log_ticks, [format_time_label(t) for t in log_ticks])
-    
+
     # Add labels and title
     plt.xlabel("Current Inter-Arrival Time (ms)")
     plt.ylabel("Next Inter-Arrival Time (ms)")
     plt.title(f"{title}\n(n={len(current_ms):,} pairs)", pad=20)
-    
+
     # Add colorbar
     cbar = plt.colorbar(im, shrink=0.8)
-    cbar.set_label('Probability Density', rotation=270, labelpad=20)
-    
+    cbar.set_label("Probability Density", rotation=270, labelpad=20)
+
     # Add grid for better readability
-    plt.grid(True, alpha=0.3, color='white', linewidth=0.5)
-    
+    plt.grid(True, alpha=0.3, color="white", linewidth=0.5)
+
     # Add diagonal line to show perfect correlation
     min_val = min(current_log.min(), next_log.min())
     max_val = max(current_log.max(), next_log.max())
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--',
-             alpha=0.7, linewidth=2, label='Perfect correlation (y=x)')
-    
+    plt.plot(
+        [min_val, max_val],
+        [min_val, max_val],
+        "r--",
+        alpha=0.7,
+        linewidth=2,
+        label="Perfect correlation (y=x)",
+    )
+
     # Add statistics text
-    pearson_corr = np.corrcoef(current_ms/1000, next_arrival_ms/1000)[0, 1]
-    spearman_corr, spearman_p = spearmanr(current_ms/1000, next_arrival_ms/1000)
-    
+    pearson_corr = np.corrcoef(current_ms / 1000, next_arrival_ms / 1000)[0, 1]
+    spearman_corr, spearman_p = spearmanr(current_ms / 1000, next_arrival_ms / 1000)
+
     stats_text = f"""
     Pearson: {pearson_corr:.3f}
     Spearman: {spearman_corr:.3f}
     P-value: {spearman_p:.2e}
     Total pairs: {len(current_ms):,}
     """
-    
-    plt.text(0.02, 0.98, stats_text.strip(),
-             transform=plt.gca().transAxes,
-             verticalalignment='top',
-             fontsize=10,
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
+
+    plt.text(
+        0.02,
+        0.98,
+        stats_text.strip(),
+        transform=plt.gca().transAxes,
+        verticalalignment="top",
+        fontsize=10,
+        bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+    )
+
     plt.tight_layout()
-    
+
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     print(f"Heatmap saved to {save_path}")
 
@@ -554,8 +594,12 @@ def main():
     trace_name = os.path.basename(args.file).split(".")[0]
 
     # Create plots
-    if "/small/" in args.file:
-        output_dir = args.output or "figures/arrival_time/small/"
+    if "/1k/" in args.file:
+        output_dir = args.output or "figures/arrival_time/1k/"
+    elif "/10k/" in args.file:
+        output_dir = args.output or "figures/arrival_time/10k/"
+    elif "/100k/" in args.file:
+        output_dir = args.output or "figures/arrival_time/100k/"
     else:
         output_dir = args.output or "figures/arrival_time/"
     Path(output_dir).mkdir(exist_ok=True)
@@ -586,9 +630,7 @@ def main():
 
     # Heatmap showing probability distribution of current vs next inter-arrival times
     heatmap_path = Path(output_dir) / f"{trace_name}_inter_arrival_heatmap.png"
-    plot_inter_arrival_heatmap(
-        df, title=base_title, save_path=str(heatmap_path)
-    )
+    plot_inter_arrival_heatmap(df, title=base_title, save_path=str(heatmap_path))
 
 
 if __name__ == "__main__":
