@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Plot token distributions for metrics traces using data_loader."""
+"""Token usage distribution analysis script
+
+Plot token distributions for metrics traces using data_loader.
+"""
 
 import argparse
 import os

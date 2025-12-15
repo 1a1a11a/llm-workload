@@ -6,3 +6,5 @@ __pycache__
 
 ._.DS_Store
 .DS_Store
+*.parquet
+*.csv

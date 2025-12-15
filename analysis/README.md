@@ -36,12 +36,16 @@ Analyzes request arrival patterns and timing distributions:
 - **Boxplot by hour** showing temporal patterns with mean lines
 - **Daily boxplot** showing day-to-day variation in arrival patterns with mean lines
 - **Correlation analysis** with prominent Pearson and Spearman coefficient display between consecutive arrival times
+- **Probability heatmap** showing joint distribution of current vs next inter-arrival times with log-scale millisecond display and outlier filtering (excludes bottom/top 0.01% extreme values to focus on 99.98% of main distribution)
 
 **Key Features:**
 - Calculates time differences between consecutive requests
 - Uses log-scale visualization for wide value ranges
 - Provides statistical summaries (mean, median, std, etc.)
 - Generates scatter plots for correlation analysis
+- Heatmap includes outlier filtering to focus visualization on main distribution
+- Shows both parametric (Pearson) and non-parametric (Spearman) correlation coefficients
+- Automatic timestamp column detection (handles both 'timestamp' and 'started_at' formats)
 
 **Usage:**
 ```bash

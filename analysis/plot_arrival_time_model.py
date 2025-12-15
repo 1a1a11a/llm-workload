@@ -10,7 +10,7 @@ Usage:
     python plot_arrival_time_model.py /path/to/metrics.csv
     python plot_arrival_time_model.py ../data/metrics_30day/DeepSeek-R1.csv --output plots
 
-Creates and saves CDF, boxplot, daily boxplot, and correlation plots automatically (no display).
+Creates and saves CDF, boxplot, daily boxplot, correlation plots, and probability heatmap automatically (no display).
 """
 
 import pandas as pd
@@ -428,6 +428,111 @@ def plot_inter_arrival_correlation(
     print(f"Correlation plot saved to {save_path}")
 
 
+def plot_inter_arrival_heatmap(df, title="Inter-Arrival Time Probability Heatmap", save_path=None):
+    """
+    Create a heatmap showing the probability distribution of current vs next inter-arrival times.
+    
+    Uses 2D histogram to show joint probability density with log-scale in milliseconds.
+    
+    Args:
+        df (pd.DataFrame): DataFrame with 'inter_arrival_time' column
+        title (str): Plot title
+        save_path (str): Path to save the plot
+    """
+    plt.figure(figsize=(12, 10))
+    
+    # Get consecutive pairs of inter-arrival times
+    inter_arrivals = df['inter_arrival_time'].values
+    
+    if len(inter_arrivals) < 2:
+        print("Not enough data points for heatmap analysis")
+        return
+    
+    # set minimum inter-arrival time to avoid log(0)
+    inter_arrivals = np.maximum(inter_arrivals, 1e-2)  # 10 ms minimum
+    inter_arrivals = np.minimum(inter_arrivals, 1e4)  # 10000 seconds maximum
+    
+    # Create pairs: (current, next)
+    current = inter_arrivals[:-1]  # All except last
+    next_arrival = inter_arrivals[1:]  # All except first
+    
+    # Convert to milliseconds for better readability
+    current_ms = current * 1000
+    next_arrival_ms = next_arrival * 1000
+    
+    print(f"Processing {len(current_ms)} points for heatmap.")
+    
+    # Create 2D histogram (probability density)
+    # Use log scale for better visualization
+    current_log = np.log10(current_ms + 1e-6)  # Add small value to avoid log(0)
+    next_log = np.log10(next_arrival_ms + 1e-6)
+    
+    # Create bins for the heatmap
+    bins = 50
+    hist, xedges, yedges = np.histogram2d(current_log, next_log, bins=bins)
+    
+    # Convert to probability density (normalize)
+    hist = hist / hist.sum()
+    
+    # Create heatmap
+    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+    im = plt.imshow(hist.T, origin='lower', extent=extent,
+                    cmap='viridis', aspect='auto', interpolation='bilinear')
+    
+    # Set custom tick labels (convert back from log scale)
+    def format_time_label(value):
+        if value == int(value):
+            return f"{int(10**value)}"
+        else:
+            return f"{10**value:.1f}"
+    
+    # Set ticks at log scale intervals
+    log_ticks = np.arange(int(current_log.min()), int(current_log.max()) + 1)
+    
+    plt.xticks(log_ticks, [format_time_label(t) for t in log_ticks])
+    plt.yticks(log_ticks, [format_time_label(t) for t in log_ticks])
+    
+    # Add labels and title
+    plt.xlabel("Current Inter-Arrival Time (ms)")
+    plt.ylabel("Next Inter-Arrival Time (ms)")
+    plt.title(f"{title}\n(n={len(current_ms):,} pairs)", pad=20)
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, shrink=0.8)
+    cbar.set_label('Probability Density', rotation=270, labelpad=20)
+    
+    # Add grid for better readability
+    plt.grid(True, alpha=0.3, color='white', linewidth=0.5)
+    
+    # Add diagonal line to show perfect correlation
+    min_val = min(current_log.min(), next_log.min())
+    max_val = max(current_log.max(), next_log.max())
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--',
+             alpha=0.7, linewidth=2, label='Perfect correlation (y=x)')
+    
+    # Add statistics text
+    pearson_corr = np.corrcoef(current_ms/1000, next_arrival_ms/1000)[0, 1]
+    spearman_corr, spearman_p = spearmanr(current_ms/1000, next_arrival_ms/1000)
+    
+    stats_text = f"""
+    Pearson: {pearson_corr:.3f}
+    Spearman: {spearman_corr:.3f}
+    P-value: {spearman_p:.2e}
+    Total pairs: {len(current_ms):,}
+    """
+    
+    plt.text(0.02, 0.98, stats_text.strip(),
+             transform=plt.gca().transAxes,
+             verticalalignment='top',
+             fontsize=10,
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    print(f"Heatmap saved to {save_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze Inter-Arrival Times")
     parser.add_argument("file", type=str, help="Path to CSV file")
@@ -477,6 +582,12 @@ def main():
     correlation_path = Path(output_dir) / f"{trace_name}_inter_arrival_correlation.png"
     plot_inter_arrival_correlation(
         df, title=base_title, save_path=str(correlation_path)
+    )
+
+    # Heatmap showing probability distribution of current vs next inter-arrival times
+    heatmap_path = Path(output_dir) / f"{trace_name}_inter_arrival_heatmap.png"
+    plot_inter_arrival_heatmap(
+        df, title=base_title, save_path=str(heatmap_path)
     )
 
 
