@@ -2,15 +2,15 @@ import matplotlib.pyplot as plt
 
 
 def setup_plot_style():
-    # Set large font sizes for better readability
+    # Set very large font sizes for better readability
     plt.rcParams.update(
         {
-            "font.size": 16,
-            "axes.labelsize": 20,
-            "axes.titlesize": 22,
-            "xtick.labelsize": 20,
-            "ytick.labelsize": 20,
-            "legend.fontsize": 20,
-            "figure.titlesize": 24,
+            "font.size": 24,
+            "axes.labelsize": 32,
+            "axes.titlesize": 36,
+            "xtick.labelsize": 28,
+            "ytick.labelsize": 28,
+            "legend.fontsize": 28,
+            "figure.titlesize": 40,
         }
     )

@@ -132,8 +132,8 @@ def plot_inter_arrival_per_user_boxplot(df, title="Inter-Arrival Times by User",
         flier.set(marker='o', color='red', alpha=0.5)
 
     # Add labels and title
-    plt.xlabel("User ID (request count)", fontsize=12)
-    plt.ylabel("Inter-Arrival Time (seconds)", fontsize=12)
+    plt.xlabel("User ID (request count)")
+    plt.ylabel("Inter-Arrival Time (seconds)")
     plt.title(f"{title}\n(Top {len(user_data)} users by request volume)", pad=20)
 
     # Use log scale for y-axis
@@ -157,7 +157,6 @@ def plot_inter_arrival_per_user_boxplot(df, title="Inter-Arrival Times by User",
     plt.text(0.02, 0.98, stats_text.strip(),
              transform=plt.gca().transAxes,
              verticalalignment='top',
-             fontsize=10,
              bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
     plt.tight_layout()
@@ -231,7 +230,7 @@ def plot_inter_arrival_per_user_summary(df, title="Inter-Arrival Time Summary by
         ax4.set_title('Request Frequency Distribution')
         ax4.grid(True, alpha=0.3)
 
-    plt.suptitle(title, fontsize=14, y=0.98)
+    plt.suptitle(title, y=0.98)
     plt.tight_layout()
 
     plt.savefig(save_path, dpi=300, bbox_inches="tight")

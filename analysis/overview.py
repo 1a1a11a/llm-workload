@@ -14,6 +14,7 @@ from multiprocessing import Pool, cpu_count
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from readers.data_loader import load_metrics_dataframe
+from utils.plot import setup_plot_style
 
 
 # Columns to exclude from analysis (too unique or not useful)
@@ -95,9 +96,9 @@ def plot_unique_values_cdf(df, output_dir="figures"):
     # Plot unique counts
     ax.bar(range(len(sorted_columns)), sorted_uniques, alpha=0.7, label="Unique Values")
     ax.set_xticks(range(len(sorted_columns)))
-    ax.set_xticklabels(sorted_columns, rotation=45, ha="right", fontsize=16)
-    ax.set_ylabel("Number of Unique Values", fontsize=16)
-    ax.set_title("Unique Values per Column (Sorted)", fontsize=16)
+    ax.set_xticklabels(sorted_columns, rotation=45, ha="right")
+    ax.set_ylabel("Number of Unique Values")
+    ax.set_title("Unique Values per Column (Sorted)")
     ax.grid(True, alpha=0.3)
 
     # Add value labels on bars
@@ -108,7 +109,6 @@ def plot_unique_values_cdf(df, output_dir="figures"):
             str(v),
             ha="center",
             va="bottom",
-            fontsize=20,
         )
 
     plt.tight_layout()
@@ -214,12 +214,9 @@ def plot_numerical_distributions(df, output_dir="figures"):
         ax.plot(sorted_data, yvals, "b-", linewidth=3, markersize=8)
 
         # Set larger fonts specifically for CDF plots
-        ax.set_title(f"{col} CDF", pad=20, fontsize=20)
-        ax.set_xlabel(col, labelpad=10, fontsize=20)
-        ax.set_ylabel("Fraction of Requests (CDF)", labelpad=10, fontsize=20)
-
-        # Set larger tick labels
-        ax.tick_params(axis="both", which="major", labelsize=20)
+        ax.set_title(f"{col} CDF", pad=20)
+        ax.set_xlabel(col, labelpad=10)
+        ax.set_ylabel("Fraction of Requests (CDF)", labelpad=10)
 
         ax.grid(True, alpha=0.3)
         ax.set_xscale("log")  # Set x-axis to log scale
@@ -378,11 +375,17 @@ def analyze_one_trace(file_path, single_model: bool):
 
 def main():
     """Main function"""
-    file_path = "/home/juncheng/workspace/prefix_cache/data/metrics_30day/"
-    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
-    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.parquet"
-    file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.csv"
-    # file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day_head.csv"
+    # Set up plot style
+    setup_plot_style()
+    
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+    else:
+        file_path = "/home/juncheng/workspace/prefix_cache/data/metrics_30day/"
+        file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
+        file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.csv"
+        file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day_head.csv"
+
     num_processes = cpu_count()
 
     if os.path.isdir(file_path) and num_processes > 1:

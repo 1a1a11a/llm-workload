@@ -216,7 +216,6 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
         stats_text.strip(),
         transform=plt.gca().transAxes,
         verticalalignment="top",
-        fontsize=10,
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
     )
 
@@ -325,7 +324,6 @@ def plot_daily_boxplot(df, title="Inter-Arrival Times by Day", save_path=None):
         stats_text.strip(),
         transform=plt.gca().transAxes,
         verticalalignment="top",
-        fontsize=10,
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
     )
 
