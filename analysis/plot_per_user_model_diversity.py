@@ -307,7 +307,7 @@ def main(csv_dir: str, output_dir: str, window_size: int, top_n_users: int) -> N
     )
 
     # Create output directory
-    output_path = Path(output_dir) / "figures" / "per_user"
+    output_path = Path(output_dir) / "figures" / "per_user_model_diversity"
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Plot the distribution

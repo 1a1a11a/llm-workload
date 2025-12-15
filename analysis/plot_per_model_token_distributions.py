@@ -269,7 +269,7 @@ def main(
     else:
         trace_name = "combined_models"
 
-    output_path = Path(f"{output_dir}/figures/token_distributions/{trace_name}")
+    output_path = Path(f"{output_dir}/figures/per_model_token_distributions/{trace_name}")
     output_path.mkdir(parents=True, exist_ok=True)
 
     # Create combined plots for all models (directly from frequency maps)

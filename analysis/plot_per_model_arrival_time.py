@@ -594,13 +594,13 @@ def main():
 
     # Create plots
     if "/1k/" in args.file:
-        output_dir = args.output or "figures/arrival_time/1k/"
+        output_dir = args.output or "figures/per_model_arrival_time/1k/"
     elif "/10k/" in args.file:
-        output_dir = args.output or "figures/arrival_time/10k/"
+        output_dir = args.output or "figures/per_model_arrival_time/10k/"
     elif "/100k/" in args.file:
-        output_dir = args.output or "figures/arrival_time/100k/"
+        output_dir = args.output or "figures/per_model_arrival_time/100k/"
     else:
-        output_dir = args.output or "figures/arrival_time/"
+        output_dir = args.output or "figures/per_model_arrival_time/"
     Path(output_dir).mkdir(exist_ok=True)
 
     base_title = "Inter-Arrival Times"
