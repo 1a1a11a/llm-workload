@@ -12,5 +12,7 @@ def setup_plot_style():
             "ytick.labelsize": 20,
             "legend.fontsize": 16,
             "figure.titlesize": 20,
+            "lines.linewidth": 2,
         }
     )
+    
