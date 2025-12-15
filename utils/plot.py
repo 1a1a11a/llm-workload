@@ -5,12 +5,12 @@ def setup_plot_style():
     # Set very large font sizes for better readability
     plt.rcParams.update(
         {
-            "font.size": 24,
-            "axes.labelsize": 32,
-            "axes.titlesize": 36,
-            "xtick.labelsize": 28,
-            "ytick.labelsize": 28,
-            "legend.fontsize": 28,
-            "figure.titlesize": 40,
+            "font.size": 20,
+            "axes.labelsize": 20,
+            "axes.titlesize": 20,
+            "xtick.labelsize": 20,
+            "ytick.labelsize": 20,
+            "legend.fontsize": 16,
+            "figure.titlesize": 20,
         }
     )

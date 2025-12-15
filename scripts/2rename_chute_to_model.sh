@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to rename chute CSV files from chute_id to chute name (part after /)
+# Script to rename the chute_id to chute_name (part after /) in the data files
 # Handles duplicate names by adding suffixes
 
 # Check if jq is available

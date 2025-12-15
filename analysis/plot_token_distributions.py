@@ -7,7 +7,6 @@ Plot token distributions for metrics traces using data_loader.
 import argparse
 import os
 import sys
-from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -23,23 +22,6 @@ from utils.plot import setup_plot_style
 def _load_records(csv_path: str) -> pd.DataFrame:
     """Load all metrics records from the given CSV path using data_loader."""
     return load_metrics_dataframe(csv_path, apply_transforms=True)
-
-
-def extract_token_data(
-    records: pd.DataFrame, model_name: str
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """Extract arrays of input and output tokens for the requested model."""
-    input_tokens: List[int] = []
-    output_tokens: List[int] = []
-    for record in records.itertuples():
-        model = getattr(record, "model_name", None)
-        chute = getattr(record, "chute_id", None)
-        if model == model_name or chute == model_name:
-            input_tokens.append(record.input_tokens)
-            output_tokens.append(record.output_tokens)
-    if not input_tokens:
-        return None, None
-    return np.array(input_tokens), np.array(output_tokens)
 
 
 def plot_cdf(
@@ -129,57 +111,69 @@ def plot_cdf_individual(
         print(f"Saved individual plot: {output_file}")
 
 
-def _select_models(
-    records: pd.DataFrame, requested: Optional[List[str]], limit: int
-) -> List[str]:
-    """Return the models to plot, defaulting to the top-N by frequency."""
-    if requested:
-        seen = []
-        for model in requested:
-            if model not in seen:
-                seen.append(model)
-        return seen
-    counts = Counter(
-        getattr(record, "model_name", getattr(record, "chute_id", "unknown"))
-        for record in records.itertuples()
-    )
-    return [model for model, _ in counts.most_common(limit)]
-
-
 def main(
-    csv_path: str, models: Optional[List[str]], output_dir: str, top_k: int
+    csv_files: List[str], model_names: Optional[List[str]], output_dir: str
 ) -> None:
-    records = _load_records(csv_path)
-    if records.empty:
-        raise RuntimeError(f"No records found in {csv_path}")
-
-    target_models = _select_models(records, models, top_k)
-    if not target_models:
-        raise RuntimeError("No models selected for plotting")
-
-    print(f"Loaded {len(records):,} records from {csv_path}")
-    print("Models to plot: " + ", ".join(target_models))
+    if len(csv_files) == 0:
+        raise RuntimeError("No CSV files provided")
+    
+    # Prepare model names - use provided names or derive from filenames
+    if model_names is None:
+        model_names = []
+        for csv_file in csv_files:
+            base_name = os.path.basename(csv_file)
+            model_name = os.path.splitext(base_name)[0]
+            model_names.append(model_name)
+    elif len(model_names) != len(csv_files):
+        raise RuntimeError(f"Number of model names ({len(model_names)}) must match number of CSV files ({len(csv_files)})")
 
     input_tokens_data: Dict[str, np.ndarray] = {}
     output_tokens_data: Dict[str, np.ndarray] = {}
     ratio_data: Dict[str, np.ndarray] = {}
 
-    for model in target_models:
-        input_tokens, output_tokens = extract_token_data(records, model)
-        if input_tokens is None or output_tokens is None:
-            print(f"  -> No samples for {model}")
+    total_records = 0
+    for csv_file, model_name in zip(csv_files, model_names):
+        records = _load_records(csv_file)
+        if records.empty:
+            print(f"  -> No records found in {csv_file}")
             continue
 
-        input_tokens_data[model] = input_tokens
-        output_tokens_data[model] = output_tokens
-        positive_mask = input_tokens > 0
-        ratio_data[model] = output_tokens[positive_mask] / input_tokens[positive_mask]
-        print(f"  -> {model}: {len(input_tokens)} samples")
+        total_records += len(records)
+        
+        # Extract all token data from this file (treating the entire file as one model)
+        input_tokens: List[int] = []
+        output_tokens: List[int] = []
+        
+        for record in records.itertuples():
+            input_tokens.append(record.input_tokens)
+            output_tokens.append(record.output_tokens)
+
+        if not input_tokens:
+            print(f"  -> No token data found in {csv_file}")
+            continue
+
+        input_tokens_data[model_name] = np.array(input_tokens)
+        output_tokens_data[model_name] = np.array(output_tokens)
+        
+        # Calculate output/input ratio for positive input tokens only
+        positive_mask = np.array(input_tokens) > 0
+        if np.any(positive_mask):
+            ratio_data[model_name] = np.array(output_tokens)[positive_mask] / np.array(input_tokens)[positive_mask]
+        
+        print(f"  -> {model_name}: {len(input_tokens)} samples from {os.path.basename(csv_file)}")
 
     if not input_tokens_data:
-        raise RuntimeError("No token data available after filtering")
+        raise RuntimeError("No token data available from any file")
 
-    trace_name = os.path.basename(csv_path).split(".")[0]
+    print(f"Loaded {total_records:,} total records from {len(csv_files)} file(s)")
+    print("Models to plot: " + ", ".join(input_tokens_data.keys()))
+
+    # Create output directory based on the first file name or a combined name
+    if len(csv_files) == 1:
+        trace_name = os.path.basename(csv_files[0]).split(".")[0]
+    else:
+        trace_name = "combined_models"
+    
     output_path = Path(f"{output_dir}/figures/token_distributions/{trace_name}")
     output_path.mkdir(parents=True, exist_ok=True)
     print(output_path)
@@ -252,13 +246,12 @@ def main(
 if __name__ == "__main__":
     setup_plot_style()
     parser = argparse.ArgumentParser(
-        description="Plot token distributions for metrics traces"
+        description="Plot token distributions for metrics traces (each file represents one model)"
     )
-    parser.add_argument("csv_path", help="Path to the metrics CSV file")
     parser.add_argument(
-        "--models",
+        "csv_files",
         nargs="+",
-        help="Specific model names to plot (defaults to top-K by frequency)",
+        help="Path to one or more metrics CSV files (each file represents one model)"
     )
     parser.add_argument(
         "--output-dir",
@@ -266,10 +259,9 @@ if __name__ == "__main__":
         help="Directory for saving the generated plots",
     )
     parser.add_argument(
-        "--top-k",
-        type=int,
-        default=8,
-        help="Number of most common models to plot when --models is not provided",
+        "--model-names",
+        nargs="+",
+        help="Model names corresponding to each CSV file (defaults to filename without extension)",
     )
     arguments = parser.parse_args()
-    main(arguments.csv_path, arguments.models, arguments.output_dir, arguments.top_k)
+    main(arguments.csv_files, arguments.model_names, arguments.output_dir)
