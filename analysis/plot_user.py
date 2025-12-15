@@ -1,3 +1,54 @@
+#!/usr/bin/env python3
+"""User-level metrics analysis and visualization
+This requires the original metrics CSV file before splitting into per-user CSVs.
+
+Analyzes and plots aggregate user behavior metrics from a metrics CSV file.
+Generates four visualizations showing user request patterns and model access patterns:
+
+1. CDF of requests per user - shows distribution of request counts across users
+2. Rank plot of requests per user - shows power-law distribution (log-log scale)
+3. CDF of models accessed per user - shows how many unique models users access
+4. Rank plot of models per user - shows model diversity distribution (log-log scale)
+
+Features:
+- Caching support for expensive computations (CDF calculations)
+- Force recompute option to refresh cached data
+- Works with large CSV files by computing statistics incrementally
+
+Input:
+    CSV file with columns: user_id, chute_id (model identifier)
+    Default: metrics_30day.csv
+
+Output:
+    - figures/user_analysis/requests_per_user_cdf.png
+    - figures/user_analysis/requests_per_user_rank.png
+    - figures/user_analysis/models_per_user_cdf.png
+    - figures/user_analysis/models_per_user_rank.png
+    - Cache files: requests_per_user_cdf.csv, models_per_user_cdf.csv
+
+Usage:
+    python3 plot_user1.py [INPUT_FILE] [OPTIONS]
+
+Options:
+    --output-dir DIR        Output directory for plots and cache (default: figures/user_analysis/)
+    --force-recompute      Recompute CDF data ignoring cache
+
+Examples:
+    # Use default file and cached data if available
+    python3 plot_user1.py
+
+    # Process specific file
+    python3 plot_user1.py metrics_7day.csv
+
+    # Force recomputation (ignore cache)
+    python3 plot_user1.py metrics_30day.csv --force-recompute
+
+    # Custom output directory
+    python3 plot_user1.py --output-dir results/user_stats/
+"""
+
+
+
 import argparse
 import os
 import sys
@@ -21,7 +72,18 @@ except ModuleNotFoundError:
 
 
 def validate_data_columns(df, required_columns):
-    """Validate that the dataframe has all required columns."""
+    """Validate that the dataframe has all required columns.
+    
+    Args:
+        df: Pandas DataFrame to validate
+        required_columns: List of required column names
+        
+    Raises:
+        ValueError: If any required columns are missing
+        
+    Note:
+        Provides helpful suggestions if alternative column names are found.
+    """
     missing_columns = [col for col in required_columns if col not in df.columns]
     if missing_columns:
         raise ValueError(f"Missing required columns: {missing_columns}")
@@ -45,6 +107,19 @@ def validate_data_columns(df, required_columns):
 def _request_distribution_cache(
     df: pd.DataFrame, cache_file: str, use_cached: bool
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute or load cached request distribution data.
+    
+    Calculates the CDF of requests per user. If cache exists and use_cached
+    is True, loads from cache instead of recomputing.
+    
+    Args:
+        df: DataFrame with user_id column
+        cache_file: Path to cache file (CSV format)
+        use_cached: Whether to use cached data if available
+        
+    Returns:
+        Tuple of (sorted request counts, CDF values)
+    """
     if use_cached and cache_file and os.path.exists(cache_file):
         print(f"Using cached data from {cache_file}")
         cached = pd.read_csv(cache_file)
@@ -65,6 +140,19 @@ def _request_distribution_cache(
 
 
 def plot_requests_per_user_cdf(df, output_dir, use_cached=True):
+    """Plot CDF of request counts per user.
+    
+    Shows what fraction of users have made up to N requests. Useful for
+    understanding user activity distribution.
+    
+    Args:
+        df: DataFrame with user_id column
+        output_dir: Directory to save plot and cache
+        use_cached: Whether to use cached CDF data if available
+        
+    Output:
+        requests_per_user_cdf.png - CDF plot with log scale on x-axis
+    """
     cache_file = os.path.join(output_dir, "requests_per_user_cdf.csv")
     requests, cdf = _request_distribution_cache(df, cache_file, use_cached)
 
@@ -83,6 +171,20 @@ def plot_requests_per_user_cdf(df, output_dir, use_cached=True):
 
 
 def plot_requests_rank(df, output_dir, use_cached=True):
+    """Plot rank vs request count on log-log scale.
+    
+    Shows power-law distribution of user activity. Top-ranked users have
+    the most requests. Useful for identifying power users and overall
+    activity skew.
+    
+    Args:
+        df: DataFrame with user_id column
+        output_dir: Directory to save plot
+        use_cached: Whether to use cached data if available
+        
+    Output:
+        requests_per_user_rank.png - Log-log rank plot
+    """
     cache_file = os.path.join(output_dir, "requests_per_user_cdf.csv")
     requests, _ = _request_distribution_cache(df, cache_file, use_cached)
     requests = np.sort(requests)[::-1]
@@ -104,7 +206,19 @@ def plot_requests_rank(df, output_dir, use_cached=True):
 
 
 def plot_models_per_user_cdf(df, output_dir, use_cached=True):
-    """CDF of number of models each user accesses (cached when available)."""
+    """Plot CDF of unique models accessed per user.
+    
+    Shows the distribution of model diversity across users. Helps understand
+    whether users stick to few models or explore many different ones.
+    
+    Args:
+        df: DataFrame with user_id and chute_id columns
+        output_dir: Directory to save plot and cache
+        use_cached: Whether to use cached data if available
+        
+    Output:
+        models_per_user_cdf.png - CDF plot with log scale on x-axis
+    """
     cache_file = os.path.join(output_dir, "models_per_user_cdf.csv")
     if use_cached and os.path.exists(cache_file):
         print(f"Using cached data from {cache_file}")
@@ -133,6 +247,19 @@ def plot_models_per_user_cdf(df, output_dir, use_cached=True):
 
 
 def plot_models_rank(df, output_dir, use_cached=True):
+    """Plot rank vs model count on log-log scale.
+    
+    Shows distribution of model diversity across users. Top-ranked users
+    access the most unique models.
+    
+    Args:
+        df: DataFrame with user_id and chute_id columns
+        output_dir: Directory to save plot
+        use_cached: Whether to use cached data if available
+        
+    Output:
+        models_per_user_rank.png - Log-log rank plot
+    """
     cache_file = os.path.join(output_dir, "models_per_user_cdf.csv")
     if use_cached and os.path.exists(cache_file):
         cached = pd.read_csv(cache_file)
@@ -161,6 +288,20 @@ def plot_models_rank(df, output_dir, use_cached=True):
 
 
 def _load_dataframe(input_file: str) -> pd.DataFrame:
+    """Load metrics dataframe from CSV file.
+    
+    Attempts to use custom data loader if available, falls back to pandas read_csv.
+    
+    Args:
+        input_file: Path to CSV file
+        
+    Returns:
+        DataFrame with loaded metrics data
+        
+    Raises:
+        FileNotFoundError: If input file doesn't exist
+        pd.errors.EmptyDataError: If input file is empty
+    """
     try:
         return load_metrics_dataframe(input_file)
     except ImportError:
@@ -169,6 +310,11 @@ def _load_dataframe(input_file: str) -> pd.DataFrame:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build argument parser for command-line interface.
+    
+    Returns:
+        Configured ArgumentParser instance
+    """
     parser = argparse.ArgumentParser(
         description="Plot per-user usage statistics from a metrics CSV file"
     )
@@ -192,6 +338,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    """Main entry point for user-level metrics analysis.
+    
+    Orchestrates the entire analysis pipeline:
+    1. Parse command-line arguments
+    2. Load data (or skip if using cache)
+    3. Validate required columns
+    4. Generate all four plots
+    
+    The function uses caching to speed up repeated runs. Cache files store
+    pre-computed CDF data. Use --force-recompute to refresh cache.
+    """
     setup_plot_style()
     parser = _build_parser()
     args = parser.parse_args()

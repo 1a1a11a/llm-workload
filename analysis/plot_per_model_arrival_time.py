@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Inter-Arrival Time Analysis Script
+This requires the per-model CSV files.
 
 This script analyzes the inter-arrival times of requests across all users
 by plotting the time differences between consecutive requests as a CDF, boxplot by hour,

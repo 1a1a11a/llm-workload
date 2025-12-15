@@ -1,15 +1,38 @@
 #!/usr/bin/env python3
 """Per-user model diversity analysis
 
-Plots the distribution of the number of unique models used by users
-in every 1000 requests. This shows how diverse users' model choices are
-within fixed-size request windows.
+Analyzes how diverse users' model choices are within fixed-size request windows.
+Creates two visualizations:
+1. Histogram + CDF showing overall distribution of model diversity across all users
+2. Box plot showing per-user diversity distributions (top N users by request count)
+
+Input:
+    Directory containing per-user CSV files. Each CSV represents one user's requests
+    with columns: invocation_id, chute_id, function_name, user_id, started_at, etc.
+
+Output:
+    - figures/per_user/model_diversity_per_<window_size>_requests.png
+        Histogram and CDF showing how many unique models users access per window
+    - figures/per_user/model_diversity_boxplot_per_<window_size>_requests.png
+        Box plot for top N users sorted by request count
 
 Usage:
-    python3 plot_per_user.py <per_user_csv_dir> --output-dir <output_dir>
+    python3 plot_per_user.py <per_user_csv_dir> [OPTIONS]
 
-Example:
-    python3 plot_per_user.py data/metrics_30day/per_user --output-dir .
+Options:
+    --output-dir DIR        Directory for saving plots (default: current directory)
+    --window-size N         Number of requests per window (default: 1000)
+    --top-n N              Number of top users to show in box plot (default: 50)
+
+Examples:
+    # Analyze users with <1M requests, using default 1000-request windows
+    python3 plot_per_user.py data/metrics_30day/per_user/1000k
+
+    # Analyze all users with 5000-request windows, show top 100
+    python3 plot_per_user.py data/metrics_30day/per_user/ --window-size 5000 --top-n 100
+
+    # Custom output directory
+    python3 plot_per_user.py data/metrics_30day/per_user/1000k --output-dir results/
 """
 
 import argparse
@@ -29,12 +52,16 @@ from utils.plot import setup_plot_style
 def analyze_user_model_diversity(csv_file: str, window_size: int = 1000) -> List[int]:
     """Analyze model diversity for a user in fixed-size request windows.
 
+    Divides user's requests into consecutive windows of size `window_size` and
+    counts the number of unique models (chute_id) used in each window.
+
     Args:
-        csv_file: Path to per-user CSV file
-        window_size: Number of requests per window
+        csv_file: Path to per-user CSV file containing request history
+        window_size: Number of consecutive requests per window (default: 1000)
 
     Returns:
-        List of unique model counts per window
+        List of unique model counts, one entry per window.
+        Example: [3, 5, 2] means 3 unique models in window 1, 5 in window 2, etc.
     """
     model_counts = []
     current_window = set()
@@ -70,7 +97,19 @@ def plot_distribution(
     total_users: int,
     total_windows: int,
 ) -> None:
-    """Plot histogram and CDF of model diversity."""
+    """Plot histogram and CDF of model diversity across all users and windows.
+
+    Creates a figure with two subplots:
+    1. Histogram showing frequency distribution with mean/median/p95 lines
+    2. CDF showing cumulative probability distribution
+
+    Args:
+        data: Flat list of unique model counts from all users and windows
+        output_path: Path where the plot will be saved
+        window_size: Size of request windows used in analysis
+        total_users: Total number of users analyzed
+        total_windows: Total number of windows across all users
+    """
 
     if len(data) == 0:
         print("No data to plot")
@@ -145,7 +184,21 @@ def plot_boxplot_per_user(
     window_size: int,
     top_n: int = 50,
 ) -> None:
-    """Plot box plot showing model diversity distribution per user."""
+    """Plot box plot showing model diversity distribution for top N users.
+
+    Each box represents one user and shows the distribution of unique models
+    they used across all their windows. Users are ranked by total number of
+    requests (windows), and only the top N are shown.
+
+    Args:
+        per_user_data: Dict mapping user_id to list of model counts per window
+        output_path: Path where the plot will be saved
+        window_size: Size of request windows used in analysis
+        top_n: Number of top users to include in the plot (default: 50)
+
+    Note:
+        Only includes users with at least 2 windows for meaningful box plots.
+    """
 
     if len(per_user_data) == 0:
         print("No per-user data to plot")
@@ -162,15 +215,15 @@ def plot_boxplot_per_user(
         print("No users with multiple windows for box plot")
         return
 
-    # Sort users by median model diversity (descending)
-    user_medians = [
+    # Sort users by number of requests (descending)
+    user_stats = [
         (user_id, np.median(counts), len(counts))
         for user_id, counts in filtered_data.items()
     ]
-    user_medians.sort(key=lambda x: x[1], reverse=True)
+    user_stats.sort(key=lambda x: x[2], reverse=True)
 
     # Select top N users
-    top_users = user_medians[:top_n]
+    top_users = user_stats[:top_n]
     user_ids = [u[0] for u in top_users]
 
     # Prepare data for box plot
@@ -187,10 +240,10 @@ def plot_boxplot_per_user(
         patch.set_facecolor("lightblue")
         patch.set_alpha(0.7)
 
-    ax.set_xlabel("User Rank (Sorted by Median Diversity)")
+    ax.set_xlabel("User Rank (Sorted by Number of Requests)")
     ax.set_ylabel(f"Unique Models per {window_size:,} Requests")
     ax.set_title(
-        f"Model Diversity Distribution per User\n(Top {len(top_users)} users by median diversity)",
+        f"Model Diversity Distribution per User\n(Top {len(top_users)} users by number of requests)",
         fontsize=14,
         pad=20,
     )
@@ -208,6 +261,14 @@ def plot_boxplot_per_user(
 
 
 def main(csv_dir: str, output_dir: str, window_size: int, top_n_users: int) -> None:
+    """Main entry point for per-user model diversity analysis.
+
+    Args:
+        csv_dir: Directory containing per-user CSV files (one CSV per user)
+        output_dir: Base directory for saving output plots
+        window_size: Number of consecutive requests per analysis window
+        top_n_users: Number of top users to show in box plot
+    """
     csv_path = Path(csv_dir)
 
     if not csv_path.exists():
