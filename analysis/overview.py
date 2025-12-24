@@ -37,7 +37,8 @@ import numpy as np
 from collections import Counter
 import os
 import sys
-from multiprocessing import Pool, cpu_count
+from pathlib import Path
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from readers.data_loader import load_metrics_dataframe
@@ -355,11 +356,22 @@ def plot_timestamp_analysis(df, output_dir="figures"):
             print(f"Error processing {col}: {e}")
 
 
-def analyze_one_trace(file_path, single_model: bool):
+def analyze_one_trace(file_path):
     """Analyze one trace"""
 
     print("Loading data...")
-    trace_name = os.path.basename(file_path).split(".")[0]
+    path_obj = Path(file_path)
+    trace_name = path_obj.stem
+
+    # Extract folder name from file path for proper output organization
+    # Expected path structure: .../per_model/{folder_name}/{model_name}.csv
+    folder_name = "unknown"
+    if "per_model" in path_obj.parts:
+        idx = path_obj.parts.index("per_model")
+        if len(path_obj.parts) > idx + 1:
+            folder_name = path_obj.parts[idx + 1]
+    elif path_obj.parent.name:
+        folder_name = path_obj.parent.name
 
     # Load data using the utility function with transformations
     df = load_metrics_dataframe(file_path, apply_transforms=True)
@@ -374,8 +386,7 @@ def analyze_one_trace(file_path, single_model: bool):
     print("=" * 50)
 
     # Create output directory
-    # output_dir = f"figures/metrics_analysis_per_model/{trace_name}"
-    output_dir = f"figures/{trace_name}"
+    output_dir = f"figures/metrics_overview/{folder_name}"
     os.makedirs(output_dir, exist_ok=True)
 
     # Analyze unique values (model_name mapping already applied in data loading)
@@ -408,30 +419,9 @@ def main():
     if len(sys.argv) > 1:
         file_path = sys.argv[1]
     else:
-        file_path = "/scratch/juncheng/data/prefix_cache/data/metrics_30day/"
-        file_path = "/scratch/juncheng/data/prefix_cache/metrics_30day.csv"
-        file_path = "/scratch/juncheng/data/prefix_cache/metrics_1day.csv"
         file_path = "/scratch/juncheng/data/prefix_cache/metrics_1day_head.csv"
 
-    num_processes = cpu_count()
-
-    if os.path.isdir(file_path) and num_processes > 1:
-        # Get all files in the directory
-        files_to_process = [
-            os.path.join(file_path, f)
-            for f in os.listdir(file_path)
-            if f.endswith((".parquet", ".csv"))
-        ]
-
-        # Use multiprocessing to process files in parallel
-        print(
-            f"Processing {len(files_to_process)} files using {num_processes} processes..."
-        )
-
-        with Pool(num_processes) as p:
-            p.map(analyze_one_trace, files_to_process, [True] * len(files_to_process))
-    else:
-        analyze_one_trace(file_path, False)
+    analyze_one_trace(file_path)
 
 
 if __name__ == "__main__":
