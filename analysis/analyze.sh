@@ -1,73 +1,69 @@
 #!/bin/bash
-# Script to run analysis plotting
+# Script to run analysis plotting with process pool
 
-##### find top 20 models #####
-mapfile -t traces < <(
-    wc -l /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/large/*.csv \
-        | grep -v "total" \
-        | sort -nr \
-        | head -n 20 \
-        | awk '{print $2}'
-)
+set -euo pipefail
+source "$(dirname "$0")/utils.sh"
 
-if ((${#traces[@]} == 0)); then
-    echo "No traces found under /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/large/" >&2
-    exit 1
-fi
+# Configuration
+MAX_PARALLEL_JOBS=8  # Number of parallel processes
+DATA_FOLDER="/scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/1000k/"
 
-echo "Top 20 models by number of requests:"
-printf '%s\n' "${traces[@]}"
-
+# Find the top 20 models by request count
+find_top_traces "$DATA_FOLDER" -1 top_traces
+echo "Found ${#top_traces[@]} traces to process"
+for trace in "${top_traces[@]}"; do
+    echo "Processing trace: $trace"
+done
 
 
 
 ##### overview of the full trace #####
 # full trace
-python3 analysis/overview.py /scratch/juncheng/data/prefix_cache/metrics_30day.csv
+run_with_pool "python3 analysis/overview.py /scratch/juncheng/data/prefix_cache/metrics_30day.csv" "overview_full_trace"
+
 # overview of per-model stats
-python3 analysis/overview.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/
+run_with_pool "python3 analysis/overview.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/" "overview_per_model"
 
 ##### user-level analysis #####
 # user-level analysis
-python3 analysis/plot_user.py /scratch/juncheng/data/prefix_cache/metrics_30day.csv
-
-
+run_with_pool "python3 analysis/plot_user.py /scratch/juncheng/data/prefix_cache/metrics_30day.csv" "user_level_analysis"
 
 ##### per-user analysis #####
 # this plots the number of models accessed by each user in a fixed-size window of 1000 requests
-python3 analysis/plot_per_user_model_diversity.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_user/1000k/
-python3 analysis/plot_per_user_model_diversity.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_user/100k/
-python3 analysis/plot_per_user_model_diversity.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_user/large/
-
-
+run_with_pool "python3 analysis/plot_per_user_model_diversity.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_user/1000k/" "per_user_diversity_1000k"
+run_with_pool "python3 analysis/plot_per_user_model_diversity.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_user/100k/" "per_user_diversity_100k"
+run_with_pool "python3 analysis/plot_per_user_model_diversity.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_user/large/" "per_user_diversity_large"
 
 ##### model-level analysis #####
 ## inter-arrival time analysis
+echo "Starting model-level inter-arrival time analysis..."
+
+# Process each trace file in the main per_model directory
 for trace in /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/*.csv; do
-    # python3 analysis/plot_per_model_arrival_time.py "$trace" &
-    # python3 analysis/plot_per_model_arrival_time.py "$trace" --per-user &
-    python3 analysis/plot_per_model_arrival_time.py "${traces[@]}" --compare-per-user &
+    if [ -f "$trace" ]; then
+        run_with_pool "python3 analysis/plot_per_model_arrival_time.py \"$trace\" --compare-per-user" "arrival_time_$(basename "$trace")"
+    fi
 done
 
+# Process each trace file in the 100k subdirectory
 for trace in /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/100k/*.csv; do
-    # python3 analysis/plot_per_model_arrival_time.py "$trace" &
-    # python3 analysis/plot_per_model_arrival_time.py "$trace" --per-user &
-    python3 analysis/plot_per_model_arrival_time.py "${traces[@]}" --compare-per-user &
+    if [ -f "$trace" ]; then
+        run_with_pool "python3 analysis/plot_per_model_arrival_time.py \"$trace\" --compare-per-user" "arrival_time_100k_$(basename "$trace")"
+    fi
 done
 
 ## plot top 20 models in a boxplot
-python3 analysis/plot_per_model_arrival_time.py "${traces[@]}" &
-python3 analysis/plot_per_model_arrival_time.py --per-user "${traces[@]}" &
-
+run_with_pool "python3 analysis/plot_per_model_arrival_time.py \"${traces[@]}\"" "arrival_time_boxplot"
+run_with_pool "python3 analysis/plot_per_model_arrival_time.py --per-user \"${traces[@]}\"" "arrival_time_boxplot_per_user"
 
 ## token usage analysis
 # token usage analysis, e.g., input and ouptut length distributions
-# # first find the ten largest models by number of requests
-# traces=$(wc -l /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/*.csv | grep -v "total" | sort -nr | head -n 10 | awk '{print $2}')
-# echo "Top 10 models by number of requests:"
-# echo "$traces"
-# then use the output to plot token distributions for these models
-python3 analysis/plot_per_model_token_distributions.py $traces
+run_with_pool "python3 analysis/plot_per_model_token_distributions.py \"${traces[@]}\"" "token_distributions"
 
+run_with_pool "python3 analysis/plot_per_model_ttft_vs_tokens.py \"${traces[@]}\"" "ttft_vs_tokens"
 
-#
+# Wait for all background jobs to complete
+wait_for_jobs
+
+echo "Analysis complete!"
+
