@@ -22,6 +22,8 @@ run_with_pool "python3 analysis/overview.py $FULL_TRACE_FILE" "overview_full_tra
 # user-level analysis
 run_with_pool "python3 analysis/plot_user.py $FULL_TRACE_FILE" "user_level_analysis"
 
+## all trace analysis
+run_with_pool "python3 analysis/plot_per_model_stat.py $DATA_FOLDER "model_level_analysis"
 
 ##### model-level analysis #####
 ## inter-arrival time analysis
