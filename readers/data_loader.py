@@ -383,10 +383,10 @@ def _apply_metrics_transforms(df: pd.DataFrame) -> pd.DataFrame:
 
 if __name__ == "__main__":
     df = load_metrics_dataframe(
-        "/home/juncheng/workspace/prefix_cache/metrics_1day.head.csv"
+        "/scratch/juncheng/data/prefix_cache/metrics_1day.head.csv"
     )
     print(df)
     df = load_metrics_dataframe(
-        "/home/juncheng/workspace/prefix_cache/metrics_1day.parquet"
+        "/scratch/juncheng/data/prefix_cache/metrics_1day.parquet"
     )
     print(df)

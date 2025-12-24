@@ -381,10 +381,10 @@ def main():
     if len(sys.argv) > 1:
         file_path = sys.argv[1]
     else:
-        file_path = "/home/juncheng/workspace/prefix_cache/data/metrics_30day/"
-        file_path = "/home/juncheng/workspace/prefix_cache/metrics_30day.csv"
-        file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day.csv"
-        file_path = "/home/juncheng/workspace/prefix_cache/metrics_1day_head.csv"
+        file_path = "/scratch/juncheng/data/prefix_cache/data/metrics_30day/"
+        file_path = "/scratch/juncheng/data/prefix_cache/metrics_30day.csv"
+        file_path = "/scratch/juncheng/data/prefix_cache/metrics_1day.csv"
+        file_path = "/scratch/juncheng/data/prefix_cache/metrics_1day_head.csv"
 
     num_processes = cpu_count()
 
