@@ -21,4 +21,4 @@
 
 ## Test
 - When you finish your code, please first test uing `/scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/100k/23346232-a0be-5448-91be-596f7ab832c2.csv`.
-- 
+- When you evaluate your changes, please do not use Deepseek traces, choose a small one.

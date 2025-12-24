@@ -19,7 +19,9 @@ find_top_traces "$DATA_FOLDER" -1 traces
 
 
 for trace in /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/1000k/*.csv; do
-# for trace in /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/large/*.csv; do
+    run_with_pool "python3 /home/juncheng/workspace/prefix_cache/analysis/plot_per_model_ttft_vs_tokens.py \"$trace\"" "ttft_vs_tokens_$(basename "$trace")"
+done
+for trace in /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/large/*.csv; do
     # ttft
     run_with_pool "python3 /home/juncheng/workspace/prefix_cache/analysis/plot_per_model_ttft_vs_tokens.py \"$trace\"" "ttft_vs_tokens_$(basename "$trace")"
 done

@@ -57,14 +57,14 @@ find_top_traces() {
 run_with_pool() {
     local cmd="$1"
     local job_name="${2:-job}"
-    echo "MAX_PARALLEL_JOBS: $MAX_PARALLEL_JOBS"
+
     # Wait if we've reached the max parallel jobs
     while [ $(jobs -r | wc -l) -ge $MAX_PARALLEL_JOBS ]; do
         sleep 1
     done
     
     # Run the command in background
-    echo "Starting: $job_name"
+    # echo "Starting: $job_name"
     eval "$cmd" &
 }
 
