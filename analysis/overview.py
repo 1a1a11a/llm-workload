@@ -1,7 +1,34 @@
 #!/usr/bin/env python3
 """
-Script to analyze metrics_30_days_head.csv and generate statistical plots.
+Script to analyze metrics data and generate statistical plots.
 Creates CDF, distribution plots, and pie charts for each column.
+
+This script analyzes LLM workload metrics data and generates comprehensive
+statistical visualizations including:
+- CDF plots of unique values per column
+- Categorical distributions with pie charts and bar charts
+- Numerical distributions with CDF plots for token metrics
+- Temporal analysis with hourly/daily distribution plots
+
+Usage:
+    python3 overview.py [input_file]
+
+The script expects data to be located at:
+    /scratch/juncheng/data/prefix_cache/metrics_30day.csv
+    /scratch/juncheng/data/prefix_cache/metrics_1day.csv
+    /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/
+
+Input data should contain columns like:
+    - user_id, chute_id, model_name, function_name
+    - input_tokens, output_tokens, ttft, duration
+    - started_at, completed_at, invocation_id
+
+Output:
+    - CDF plots of unique values
+    - Categorical distribution plots
+    - Numerical distribution plots
+    - Temporal analysis plots
+    - All saved to figures/ directory
 """
 
 import pandas as pd

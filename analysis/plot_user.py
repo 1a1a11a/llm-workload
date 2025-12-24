@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""User-level metrics analysis and visualization
-This requires the original metrics CSV file before splitting into per-user CSVs.
+"""
+User-level metrics analysis and visualization for LLM workload data.
 
-Analyzes and plots aggregate user behavior metrics from a metrics CSV file.
-Generates four visualizations showing user request patterns and model access patterns:
+This script analyzes and plots aggregate user behavior metrics from a metrics CSV file.
+It generates four key visualizations showing user request patterns and model access patterns:
 
 1. CDF of requests per user - shows distribution of request counts across users
 2. Rank plot of requests per user - shows power-law distribution (log-log scale)
 3. CDF of models accessed per user - shows how many unique models users access
 4. Rank plot of models per user - shows model diversity distribution (log-log scale)
 
-Features:
+Key Features:
 - Caching support for expensive computations (CDF calculations)
 - Force recompute option to refresh cached data
 - Works with large CSV files by computing statistics incrementally
+- Handles both user_id and chute_id columns (with automatic column detection)
+- Generates high-resolution plots (300 DPI)
 
-Input:
+Input Requirements:
     CSV file with columns: user_id, chute_id (model identifier)
+    Expected data location: /scratch/juncheng/data/prefix_cache/metrics_30day.csv
     Default: metrics_30day.csv
 
 Output:
@@ -27,7 +30,7 @@ Output:
     - Cache files: requests_per_user_cdf.csv, models_per_user_cdf.csv
 
 Usage:
-    python3 plot_user1.py [INPUT_FILE] [OPTIONS]
+    python3 plot_user.py [INPUT_FILE] [OPTIONS]
 
 Options:
     --output-dir DIR        Output directory for plots and cache (default: figures/user_analysis/)
@@ -35,16 +38,16 @@ Options:
 
 Examples:
     # Use default file and cached data if available
-    python3 plot_user1.py
+    python3 plot_user.py
 
     # Process specific file
-    python3 plot_user1.py metrics_7day.csv
+    python3 plot_user.py metrics_7day.csv
 
     # Force recomputation (ignore cache)
-    python3 plot_user1.py metrics_30day.csv --force-recompute
+    python3 plot_user.py metrics_30day.csv --force-recompute
 
     # Custom output directory
-    python3 plot_user1.py --output-dir results/user_stats/
+    python3 plot_user.py --output-dir results/user_stats/
 """
 
 

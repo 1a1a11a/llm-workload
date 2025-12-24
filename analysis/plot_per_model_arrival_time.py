@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Inter-Arrival Time Analysis Script
-This requires the per-model CSV files. The input can be one or more files. 
+This requires the per-model CSV files. The input can be one or more files.
 
 This script analyzes the inter-arrival times of requests across all users
 by plotting the time differences between consecutive requests as a CDF, boxplot by hour,
 daily boxplot, and correlation between consecutive inter-arrival times.
-When multiple traces are provided, they are processed in parallel and a single boxplot is generated with one box per trace.
+When multiple traces are provided, all-user and per-user inter-arrival times for
+each trace are processed in parallel and plotted side-by-side in a single grouped figure.
 
 Usage:
     python plot_per_model_arrival_time.py /path/to/metrics.csv
@@ -18,7 +19,7 @@ The --per-user flag calculates inter-arrival times only within each user (not ac
 Use --workers to control the parallelism when loading multiple traces.
 
 Creates and saves CDF, boxplot, daily boxplot, correlation plots, and probability heatmap automatically (no display).
-Processed inter-arrival data is cached alongside the generated figures so repeated runs can reuse the cached data.
+Only the inter-arrival duration frequency maps are cached (for CDF reuse); full dataframes are reloaded each run to avoid stale results.
 """
 
 import pandas as pd
@@ -27,7 +28,8 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
 from scipy.stats import spearmanr
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from typing import Dict, Tuple
 
 import os
 import sys
@@ -53,7 +55,11 @@ def infer_output_dir(sample_file, per_user, override_dir=None):
     if override_dir:
         return Path(override_dir)
 
-    base_dir = "figures/per_model_arrival_time_per_user/" if per_user else "figures/per_model_arrival_time/"
+    base_dir = (
+        "figures/per_model_arrival_time_per_user/"
+        if per_user
+        else "figures/per_model_arrival_time/"
+    )
     if "/1k/" in sample_file:
         return Path(base_dir) / "1k"
     if "/10k/" in sample_file:
@@ -62,28 +68,39 @@ def infer_output_dir(sample_file, per_user, override_dir=None):
         return Path(base_dir) / "100k"
     if "/1000k/" in sample_file:
         return Path(base_dir) / "1000k"
+    if "/large/" in sample_file:
+        return Path(base_dir) / "large"
     return Path(base_dir)
 
 
-def get_cache_path(output_dir, trace_name, per_user=False):
-    """
-    Return the cache path for processed inter-arrival data.
-
-    Args:
-        output_dir (Path): Output directory for figures/data
-        trace_name (str): Base name of the trace file
-        per_user (bool): Whether this trace was processed per user
-
-    Returns:
-        Path: Cache file path
-    """
+def get_duration_map_cache_path(output_dir, trace_name, per_user=False):
+    """Return cache path for duration frequency map."""
     suffix = "per_user" if per_user else "all_users"
-    return Path(output_dir) / 'pkl' / f"{trace_name}_processed_{suffix}.pkl"
+    return Path(output_dir) / "pkl" / f"{trace_name}_duration_freq_map_{suffix}.pkl"
 
 
-def load_or_process_trace(file_path, per_user, output_dir):
+def build_duration_frequency_map(
+    df: pd.DataFrame, decimals: int = 6
+) -> Dict[float, int]:
+    """Create frequency map of inter-arrival durations rounded to given decimals."""
+    if "inter_arrival_time" not in df.columns or len(df) == 0:
+        return {}
+
+    rounded = df["inter_arrival_time"].round(decimals)
+    freq_series = rounded.value_counts().sort_index()
+    freq_map = {float(duration): int(count) for duration, count in freq_series.items()}
+    print(
+        f"Built duration frequency map with {len(freq_map):,} unique durations "
+        f"(rounded to {decimals} decimals)."
+    )
+    return freq_map
+
+
+def load_or_process_trace(
+    file_path, per_user, output_dir
+) -> Tuple[pd.DataFrame, Dict[float, int]]:
     """
-    Load processed data from cache if it exists; otherwise process and cache it.
+    Load CSV data, compute inter-arrival statistics, and cache only the duration map.
 
     Args:
         file_path (str): Original CSV file path
@@ -91,20 +108,38 @@ def load_or_process_trace(file_path, per_user, output_dir):
         output_dir (Path): Directory to store cached data
 
     Returns:
-        pd.DataFrame: Processed dataframe with inter-arrival information
+        Tuple[pd.DataFrame, Dict[float, int]]: Processed dataframe with inter-arrival
+        information and the cached duration frequency map for plotting.
     """
     trace_name = Path(file_path).stem
-    cache_path = get_cache_path(output_dir, trace_name, per_user)
+    duration_cache_path = get_duration_map_cache_path(output_dir, trace_name, per_user)
 
-    if cache_path.exists():
-        print(f"Loading cached inter-arrival data from {cache_path}")
-        df = pd.read_pickle(cache_path)
+    # Always reload and process CSV to avoid stale cached dataframes
+    df = load_and_process_data(file_path, per_user=per_user)
+
+    cache_is_fresh = False
+    if duration_cache_path.exists():
+        try:
+            cache_is_fresh = (
+                duration_cache_path.stat().st_mtime
+                >= Path(file_path).stat().st_mtime
+            )
+        except FileNotFoundError:
+            cache_is_fresh = False
+
+    if cache_is_fresh:
+        print(f"Loading cached duration frequency map from {duration_cache_path}")
+        duration_freq_map = pd.read_pickle(duration_cache_path)
     else:
-        df = load_and_process_data(file_path, per_user=per_user)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_pickle(cache_path)
-        print(f"Saved processed inter-arrival data to {cache_path}")
-    return df
+        duration_freq_map = build_duration_frequency_map(df)
+        duration_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.to_pickle(duration_freq_map, duration_cache_path)
+        print(f"Saved duration frequency map to {duration_cache_path}")
+
+    if duration_freq_map is None:
+        duration_freq_map = {}
+
+    return df, duration_freq_map
 
 
 def load_and_process_data(filepath, per_user=False):
@@ -142,14 +177,18 @@ def load_and_process_data(filepath, per_user=False):
     if per_user:
         # Calculate inter-arrival times per user
         if "user_id" not in df.columns:
-            raise ValueError("No user_id column found. Cannot calculate per-user inter-arrival times.")
-        
+            raise ValueError(
+                "No user_id column found. Cannot calculate per-user inter-arrival times."
+            )
+
         # Sort by user_id and started_at
         df = df.sort_values(["user_id", "started_at"]).reset_index(drop=True)
-        
+
         # Calculate inter-arrival time within each user group
-        df["inter_arrival_time"] = df.groupby("user_id")["started_at"].diff().dt.total_seconds()
-        
+        df["inter_arrival_time"] = (
+            df.groupby("user_id")["started_at"].diff().dt.total_seconds()
+        )
+
         print(f"Loaded {len(df)} rows from {df['user_id'].nunique()} users")
     else:
         # Calculate inter-arrival times across all users
@@ -168,34 +207,57 @@ def load_and_process_data(filepath, per_user=False):
     # Enforce a minimum inter-arrival time to avoid log-scale issues downstream
     df["inter_arrival_time"] = df["inter_arrival_time"].clip(lower=1e-3)
 
-    print(f"Processed {len(df)} inter-arrival times (removed {rows_removed} NaN values)")
+    print(
+        f"Processed {len(df)} inter-arrival times (removed {rows_removed} NaN values)"
+    )
     print(f"Time range: {df['started_at'].min()} to {df['started_at'].max()}")
 
     return df
 
 
-def plot_inter_arrival_times(df, title="Inter-Arrival Times", save_path=None):
+def plot_inter_arrival_times(freq_map, title="Inter-Arrival Times", save_path=None):
     """
-    Plot the inter-arrival times as a Cumulative Distribution Function (CDF).
+    Plot the inter-arrival times as a Cumulative Distribution Function (CDF)
+    using a precomputed duration frequency map {duration: count}.
 
     Args:
-        df (pd.DataFrame): DataFrame with 'inter_arrival_time' column
+        freq_map (Dict[float, int]): Mapping of duration to observation count
         title (str): Plot title
         save_path (str): Path to save the plot
     """
+    if not freq_map:
+        print("No inter-arrival data available for CDF plot.")
+        return
+
     plt.figure(figsize=(12, 10))
 
-    # Sort inter-arrival times for CDF
-    sorted_times = np.sort(df["inter_arrival_time"])
-    yvals = np.arange(len(sorted_times)) / float(len(sorted_times))
+    sorted_items = sorted(freq_map.items())
+    values = np.array([float(duration) for duration, _ in sorted_items])
+    counts = np.array([int(count) for _, count in sorted_items])
+    cumulative_counts = np.cumsum(counts)
+    total = cumulative_counts[-1]
+    if total == 0:
+        print("Frequency map contained zero counts; skipping CDF plot.")
+        return
+
+    yvals = cumulative_counts / float(total)
 
     # Create CDF plot
-    plt.plot(sorted_times, yvals, "b-", linewidth=2, alpha=0.8)
+    plt.plot(values, yvals, "b-", linewidth=2, alpha=0.8)
+
+    # Calculate summary statistics using frequency map
+    mean_val = float(np.sum(values * counts) / total)
+    median_idx = np.searchsorted(cumulative_counts, total / 2)
+    median_val = float(values[min(median_idx, len(values) - 1)])
+    variance = float(np.sum(((values - mean_val) ** 2) * counts) / total)
+    std_val = float(np.sqrt(variance))
+    min_val = float(values[0])
+    max_val = float(values[-1])
 
     # Add labels and title
     plt.xlabel("Inter-Arrival Time (seconds)")
     plt.ylabel("Cumulative Probability")
-    plt.title(f"{title} - CDF\n(n={len(df):,})", pad=20)
+    plt.title(f"{title} - CDF\n(n={total:,})", pad=20)
 
     # Use log scale for x-axis since inter-arrival times span multiple orders of magnitude
     plt.xscale("log")
@@ -205,11 +267,11 @@ def plot_inter_arrival_times(df, title="Inter-Arrival Times", save_path=None):
 
     # Add statistics text
     stats_text = f"""
-    Mean: {df["inter_arrival_time"].mean():,.3f}s
-    Median: {df["inter_arrival_time"].median():,.3f}s
-    Std: {df["inter_arrival_time"].std():,.3f}s
-    Min: {df["inter_arrival_time"].min():,.6f}s
-    Max: {df["inter_arrival_time"].max():,.3f}s
+    Mean: {mean_val:,.3f}s
+    Median: {median_val:,.3f}s
+    Std: {std_val:,.3f}s
+    Min: {min_val:,.6f}s
+    Max: {max_val:,.3f}s
     """
     plt.text(
         0.02,
@@ -257,11 +319,10 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
         patch_artist=True,
         positions=positions,
         showmeans=True,
-        meanline=True,
     )
 
     # Set custom tick labels
-    plt.xticks(positions, hour_labels, rotation=45)
+    plt.xticks(positions, hour_labels, rotation=90)
 
     # Customize boxplot colors
     for patch in bp["boxes"]:
@@ -280,13 +341,21 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
     for flier in bp["fliers"]:
         flier.set(marker="o", color="red", alpha=0.5)
 
-    # Customize mean lines to be visually distinct
+    # Customize mean markers as triangles so plots consistently show the mean shape
     for mean in bp["means"]:
-        mean.set(color="green", linewidth=3)
-        mean.set_alpha(0.8)
+        mean.set(
+            color="green",
+            linewidth=0,
+            linestyle="None",
+            marker="^",
+            markersize=10,
+            markerfacecolor="green",
+            markeredgecolor="black",
+        )
+        mean.set_alpha(0.9)
 
-    # Add means label to legend
-    plt.plot([], [], color="green", linewidth=3, label="Mean")
+    # Add means label to legend matching triangle styling
+    plt.plot([], [], color="green", marker="^", linestyle="None", markersize=10, label="Mean")
     plt.legend(loc="upper right")
 
     # Add labels and title
@@ -298,7 +367,7 @@ def plot_hourly_boxplot(df, title="Inter-Arrival Times by Hour", save_path=None)
     plt.yscale("log")
 
     # Rotate x-axis labels for better readability
-    plt.xticks(rotation=45)
+    plt.xticks(rotation=90)
 
     # Add grid
     plt.grid(True, alpha=0.3, axis="y")
@@ -357,7 +426,6 @@ def plot_daily_boxplot(df, title="Inter-Arrival Times by Day", save_path=None):
         patch_artist=True,
         positions=positions,
         showmeans=True,
-        meanline=True,
     )
 
     # Set custom tick labels - show every nth date if too many
@@ -386,13 +454,20 @@ def plot_daily_boxplot(df, title="Inter-Arrival Times by Day", save_path=None):
     for flier in bp["fliers"]:
         flier.set(marker="o", color="red", alpha=0.5)
 
-    # Customize mean lines to be visually distinct
+    # Customize mean markers as triangles consistently across plots
     for mean in bp["means"]:
-        mean.set(color="green", linewidth=3)
-        mean.set_alpha(0.8)
+        mean.set(
+            color="green",
+            linewidth=0,
+            linestyle="None",
+            marker="^",
+            markersize=10,
+            markerfacecolor="green",
+            markeredgecolor="black",
+        )
+        mean.set_alpha(0.9)
 
-    # Add means label to legend
-    plt.plot([], [], color="green", linewidth=3, label="Mean")
+    plt.plot([], [], color="green", marker="^", linestyle="None", markersize=10, label="Mean")
     plt.legend(loc="upper right")
 
     # Add labels and title
@@ -404,7 +479,7 @@ def plot_daily_boxplot(df, title="Inter-Arrival Times by Day", save_path=None):
     plt.yscale("log")
 
     # Rotate x-axis labels for better readability
-    plt.xticks(rotation=45)
+    plt.xticks(rotation=90)
 
     # Add grid
     plt.grid(True, alpha=0.3, axis="y")
@@ -432,64 +507,128 @@ def plot_daily_boxplot(df, title="Inter-Arrival Times by Day", save_path=None):
     print(f"Daily boxplot saved to {save_path}")
 
 
-def plot_multi_trace_boxplot(dfs, trace_labels, title="Inter-Arrival Times", save_path=None):
+def plot_multi_trace_boxplot_grouped(
+    all_user_dfs,
+    per_user_dfs,
+    trace_labels,
+    title="Inter-Arrival Times Comparison",
+    save_path=None,
+):
     """
-    Plot a single boxplot figure where each box represents a trace's inter-arrival times.
+    Plot grouped boxplots with all-user and per-user inter-arrival times per trace.
 
-    Args:
-        dfs (List[pd.DataFrame]): DataFrames with 'inter_arrival_time' for each trace
-        trace_labels (List[str]): Labels for each trace
-        title (str): Plot title
-        save_path (str): Path to save the plot
+    Each trace contributes two side-by-side boxes (all users vs per user) so the
+    comparison happens in a single figure.
     """
-    plt.figure(figsize=(12, 10))
+    if not all_user_dfs or not per_user_dfs or not trace_labels:
+        print("No data provided for grouped multi-trace boxplot.")
+        return
 
-    inter_arrival_data = [df["inter_arrival_time"].values for df in dfs]
-    counts = [len(values) for values in inter_arrival_data]
-    labels_with_counts = [
-        f"{label[:28]}(n={count:,})" for label, count in zip(trace_labels, counts)
-    ]
+    plt.figure(figsize=(14, 10))
 
-    bp = plt.boxplot(
-        inter_arrival_data,
+    all_data = [df["inter_arrival_time"].values for df in all_user_dfs]
+    per_data = [df["inter_arrival_time"].values for df in per_user_dfs]
+
+    num_traces = len(trace_labels)
+    group_positions = np.arange(num_traces) * 2.0 + 1.0
+    offset = 0.35
+    positions_all = group_positions - offset
+    positions_per = group_positions + offset
+
+    all_color = "#1f77b4"
+    per_color = "#ff7f0e"
+
+    bp_all = plt.boxplot(
+        all_data,
         patch_artist=True,
+        positions=positions_all,
         showmeans=True,
-        meanline=True,
+        meanline=False,
+        widths=0.5,
+    )
+    bp_per = plt.boxplot(
+        per_data,
+        patch_artist=True,
+        positions=positions_per,
+        showmeans=True,
+        meanline=False,
+        widths=0.5,
     )
 
-    colors = plt.cm.tab20(np.linspace(0, 1, len(inter_arrival_data)))
-    for patch, color in zip(bp["boxes"], colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.7)
+    for patch in bp_all["boxes"]:
+        patch.set_facecolor(all_color)
+        patch.set_alpha(0.4)
+    for patch in bp_per["boxes"]:
+        patch.set_facecolor(per_color)
+        patch.set_alpha(0.4)
 
-    for whisker in bp["whiskers"]:
+    for whisker in bp_all["whiskers"] + bp_per["whiskers"]:
         whisker.set(color="gray", linewidth=1.5)
-
-    for cap in bp["caps"]:
+    for cap in bp_all["caps"] + bp_per["caps"]:
         cap.set(color="gray", linewidth=1.5)
+    for median in bp_all["medians"]:
+        median.set(color=all_color, linewidth=2)
+    for median in bp_per["medians"]:
+        median.set(color=per_color, linewidth=2)
+    for flier in bp_all["fliers"]:
+        flier.set(marker="o", color=all_color, alpha=0.4)
+    for flier in bp_per["fliers"]:
+        flier.set(marker="o", color=per_color, alpha=0.4)
 
-    for median in bp["medians"]:
-        median.set(color="red", linewidth=2)
+    for mean in bp_all["means"]:
+        mean.set(
+            color=all_color,
+            linewidth=0,
+            linestyle="None",
+            marker="^",
+            markersize=10,
+            markerfacecolor=all_color,
+            markeredgecolor="black",
+        )
+        mean.set_alpha(0.9)
+    for mean in bp_per["means"]:
+        mean.set(
+            color=per_color,
+            linewidth=0,
+            linestyle="None",
+            marker="^",
+            markersize=10,
+            markerfacecolor=per_color,
+            markeredgecolor="black",
+        )
+        mean.set_alpha(0.9)
 
-    for flier in bp["fliers"]:
-        flier.set(marker="o", color="red", alpha=0.5)
-
-    for mean in bp["means"]:
-        mean.set(color="green", linewidth=3)
-        mean.set_alpha(0.8)
-
-    plt.plot([], [], color="green", linewidth=3, label="Mean")
+    plt.plot(
+        [],
+        [],
+        color=all_color,
+        marker="^",
+        linestyle="None",
+        markersize=10,
+        label="All users (mean)",
+    )
+    plt.plot(
+        [],
+        [],
+        color=per_color,
+        marker="^",
+        linestyle="None",
+        markersize=10,
+        label="Per user (mean)",
+    )
     plt.legend(loc="upper right")
 
-    plt.xticks(range(1, len(labels_with_counts) + 1), labels_with_counts, rotation=90, ha="right", fontsize=12)
+    truncated_labels = [label[:32] for label in trace_labels]
+    plt.xticks(group_positions, truncated_labels, rotation=90, ha="center", fontsize=11)
     plt.xlabel("Trace")
     plt.ylabel("Inter-Arrival Time (seconds)")
-    plt.title(f"{title}\n({len(inter_arrival_data)} traces)", pad=20)
+    plt.title(f"{title}\n({num_traces} traces)", pad=20)
     plt.yscale("log")
     plt.grid(True, alpha=0.3, axis="y")
 
-    total_points = sum(counts)
-    stats_text = f"Total traces: {len(inter_arrival_data)}\nTotal inter-arrival samples: {total_points:,}"
+    total_all = sum(len(values) for values in all_data)
+    total_per = sum(len(values) for values in per_data)
+    stats_text = f"Total traces: {num_traces}\nSamples (all users): {total_all:,}\nSamples (per user): {total_per:,}"
     plt.text(
         0.02,
         0.98,
@@ -502,7 +641,7 @@ def plot_multi_trace_boxplot(dfs, trace_labels, title="Inter-Arrival Times", sav
     plt.tight_layout()
 
     plt.savefig(save_path, dpi=400, bbox_inches="tight")
-    print(f"Multi-trace boxplot saved to {save_path}")
+    print(f"Grouped multi-trace boxplot saved to {save_path}")
 
 
 def plot_inter_arrival_correlation(
@@ -740,6 +879,37 @@ def plot_inter_arrival_heatmap(
     print(f"Heatmap saved to {save_path}")
 
 
+def load_traces_for_modes(
+    file_paths,
+    output_dir,
+    worker_count,
+    per_user_modes=(False, True),
+) -> Dict[str, Dict[bool, Tuple[pd.DataFrame, Dict[float, int]]]]:
+    """Process each file for the requested per_user modes in parallel."""
+    trace_results: Dict[str, Dict[bool, Tuple[pd.DataFrame, Dict[float, int]]]] = {}
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        future_to_meta = {
+            executor.submit(
+                load_or_process_trace, file_path, per_user_mode, output_dir
+            ): (file_path, per_user_mode)
+            for file_path in file_paths
+            for per_user_mode in per_user_modes
+        }
+        for future in as_completed(future_to_meta):
+            file_path, per_user_mode = future_to_meta[future]
+            try:
+                df, duration_map = future.result()
+                df["inter_arrival_time"] = df["inter_arrival_time"].clip(lower=1e-3)
+                trace_results.setdefault(file_path, {})[per_user_mode] = (
+                    df,
+                    duration_map,
+                )
+            except Exception as exc:
+                mode_desc = "per-user" if per_user_mode else "all-user"
+                print(f"Failed to process {file_path} ({mode_desc}): {exc}")
+    return trace_results
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze Inter-Arrival Times")
     parser.add_argument(
@@ -749,8 +919,11 @@ def main():
         help="Path(s) to per-model CSV file(s). Provide multiple to plot trace-level boxplot.",
     )
     parser.add_argument("--output", "-o", type=str, help="Output directory for plots")
-    parser.add_argument("--per-user", action="store_true", 
-                        help="Calculate inter-arrival times per user (only for same user)")
+    parser.add_argument(
+        "--per-user",
+        action="store_true",
+        help="Calculate inter-arrival times per user (only for same user)",
+    )
     parser.add_argument(
         "--workers",
         type=int,
@@ -767,48 +940,51 @@ def main():
 
     if multi_trace_mode:
         worker_count = args.workers or min(len(args.files), os.cpu_count() or 4)
-        print(f"Processing {len(args.files)} traces using {worker_count} parallel worker(s)...")
+        print(
+            f"Processing {len(args.files)} traces using {worker_count} parallel worker(s)..."
+        )
+        print("Generating multi-trace grouped boxplot for all-user & per-user data.")
 
-        trace_results = {}
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            future_to_file = {
-                executor.submit(
-                    load_or_process_trace, file_path, args.per_user, output_dir
-                ): file_path
-                for file_path in args.files
-            }
-            for future in as_completed(future_to_file):
-                file_path = future_to_file[future]
-                try:
-                    df = future.result()
-                    df["inter_arrival_time"] = df["inter_arrival_time"].clip(lower=1e-3)
-                    trace_results[file_path] = df
-                except Exception as exc:
-                    print(f"Failed to process {file_path}: {exc}")
+        trace_results = load_traces_for_modes(
+            args.files, output_dir, worker_count, per_user_modes=(False, True)
+        )
 
-        trace_dfs = []
+        all_user_dfs = []
+        per_user_dfs = []
         trace_labels = []
         for file_path in args.files:
-            df = trace_results.get(file_path)
-            if df is None:
-                print(f"Skipping {file_path} due to previous errors.")
+            per_mode_map = trace_results.get(file_path, {})
+            all_result = per_mode_map.get(False)
+            per_result = per_mode_map.get(True)
+            if all_result is None or per_result is None:
+                print(
+                    f"Skipping {file_path} because both all-user and per-user data are required."
+                )
                 continue
-            if len(df) == 0:
-                print(f"No valid inter-arrival time data found in {file_path}; skipping.")
+            all_df, _ = all_result
+            per_df, _ = per_result
+            if len(all_df) == 0 or len(per_df) == 0:
+                print(f"No valid inter-arrival data found in {file_path}; skipping.")
                 continue
-            trace_dfs.append(df)
+            all_user_dfs.append(all_df)
+            per_user_dfs.append(per_df)
             trace_labels.append(Path(file_path).stem)
 
-        if not trace_dfs:
-            print("No valid inter-arrival time data found across provided traces. Exiting.")
+        if not all_user_dfs:
+            print(
+                "No valid inter-arrival time data found across provided traces. Exiting."
+            )
             return
 
-        base_title = "Inter-Arrival Times (Per User)" if args.per_user else "Inter-Arrival Times"
+        base_title = "Inter-Arrival Times (All Users vs Per User)"
         title = f"{base_title} - Multiple Traces"
         suffix = args.files[0].split("/")[-2]
-        boxplot_path = output_dir.parent / f"multi_trace_inter_arrival_boxplot_{suffix}.png"
-        plot_multi_trace_boxplot(
-            trace_dfs,
+        boxplot_path = (
+            output_dir.parent / f"multi_trace_inter_arrival_boxplot_{suffix}.png"
+        )
+        plot_multi_trace_boxplot_grouped(
+            all_user_dfs,
+            per_user_dfs,
             trace_labels,
             title=title,
             save_path=str(boxplot_path),
@@ -819,7 +995,9 @@ def main():
     file_path = args.files[0]
 
     # Load and process data
-    df = load_or_process_trace(file_path, per_user=args.per_user, output_dir=output_dir)
+    df, duration_freq_map = load_or_process_trace(
+        file_path, per_user=args.per_user, output_dir=output_dir
+    )
 
     if len(df) == 0:
         print("No valid inter-arrival time data found. Exiting.")
@@ -831,13 +1009,17 @@ def main():
 
     trace_name = os.path.basename(file_path).split(".")[0]
 
-    base_title = "Inter-Arrival Times (Per User)" if args.per_user else "Inter-Arrival Times"
+    base_title = (
+        "Inter-Arrival Times (Per User)" if args.per_user else "Inter-Arrival Times"
+    )
     if file_path:
         base_title += f" - {Path(file_path).name}"
 
     # CDF
     cdf_path = Path(output_dir) / f"{trace_name}_inter_arrival_cdf.png"
-    plot_inter_arrival_times(df, title=base_title, save_path=str(cdf_path))
+    plot_inter_arrival_times(
+        duration_freq_map, title=base_title, save_path=str(cdf_path)
+    )
 
     # Boxplot by hour (always created)
     boxplot_path = Path(output_dir) / f"{trace_name}_inter_arrival_boxplot.png"

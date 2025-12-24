@@ -1,132 +1,121 @@
-# Analysis Scripts
+# LLM Workload Analysis Toolkit
 
-This directory contains Python scripts for analyzing metrics data and generating statistical visualizations.
+This repository contains a collection of scripts for analyzing LLM workload metrics data. The analysis focuses on understanding user behavior, model usage patterns, and request timing characteristics.
 
-## Files Overview
+## Data Structure
 
-### `overview.py`
-**Comprehensive metrics analysis script**
-This is the initial script to run for a broad overview of metrics data. This can be done per-model or across all models. 
-The input is hardcoded in the script, it takes either a single CSV file or a directory of CSV files. 
-
-Analyzes metrics data (CSV format) and generates statistical plots:
-- **CDF plots** of unique values per column
-- **Categorical distributions** with pie charts and bar charts
-- **Numerical distributions** with CDF plots for token metrics
-- **Temporal analysis** with hourly/daily distribution plots
-
-**Key Features:**
-- Loads data using `load_metrics_dataframe` utility
-- Excludes unique identifiers (invocation_id, timestamps)
-- Supports multiprocessing for batch file processing
-- Generates high-resolution plots (300 DPI)
-- Outputs to organized directory structure
-
-**Usage:**
-```bash
-python overview.py
+The analysis expects data to be located at:
+```
+/scratch/juncheng/data/prefix_cache/
+├── metrics_30day.csv
+├── metrics_1day.csv
+├── data/
+│   └── metrics_30day/
+│       └── per_model/
+│           ├── model1.csv
+│           ├── model2.csv
+│           └── ...
 ```
 
----
+## Analysis Scripts
 
-### `plot_arrival_time_model.py`
-**Inter-arrival time analysis per-model across all users**
-Analyzes request arrival patterns and timing distributions:
-- **CDF plot** of inter-arrival times (log-scale)
-- **Boxplot by hour** showing temporal patterns with mean lines
-- **Daily boxplot** showing day-to-day variation in arrival patterns with mean lines
-- **Correlation analysis** with prominent Pearson and Spearman coefficient display between consecutive arrival times
-- **Probability heatmap** showing joint distribution of current vs next inter-arrival times with log-scale millisecond display and outlier filtering (excludes bottom/top 0.01% extreme values to focus on 99.98% of main distribution)
+### 1. Overview Analysis (`overview.py`)
+- Analyzes overall metrics distribution
+- Generates CDF plots for unique values
+- Creates categorical distributions (pie charts, bar charts)
+- Shows numerical distributions (token usage, timing)
+- Temporal analysis of request patterns
 
-**Key Features:**
-- Calculates time differences between consecutive requests
-- Uses log-scale visualization for wide value ranges
-- Provides statistical summaries (mean, median, std, etc.)
-- Generates scatter plots for correlation analysis
-- Heatmap includes outlier filtering to focus visualization on main distribution
-- Shows both parametric (Pearson) and non-parametric (Spearman) correlation coefficients
-- Automatic timestamp column detection (handles both 'timestamp' and 'started_at' formats)
+### 2. User-Level Analysis (`plot_user.py`)
+- CDF of requests per user
+- Rank plot of requests per user (power-law distribution)
+- CDF of models accessed per user
+- Rank plot of models per user (model diversity)
 
-**Usage:**
+### 3. Per-Model Analysis (`plot_per_model_token_distributions.py`)
+- Input token distribution CDF
+- Output token distribution CDF
+- Output/Input ratio distribution CDF
+- Individual model plots
+- Combined plots for multiple models
+
+### 4. Inter-Arrival Time Analysis (`plot_per_model_arrival_time.py`)
+- CDF of inter-arrival times
+- Hourly boxplot analysis
+- Daily boxplot analysis
+- Correlation between consecutive inter-arrival times
+- Probability heatmap of current vs next inter-arrival times
+
+### 5. Per-User Model Diversity (`plot_per_user_model_diversity.py`)
+- Analysis of model diversity per user
+- Plots showing number of models accessed by each user
+- Works with different data window sizes (100k, 1000k, large)
+
+## Usage
+
+### Running Individual Scripts
+
 ```bash
-python plot_arrival_time_model.py /path/to/metrics.csv
+# Overview analysis
+python3 analysis/overview.py /scratch/juncheng/data/prefix_cache/metrics_30day.csv
+
+# User analysis
+python3 analysis/plot_user.py /scratch/juncheng/data/prefix_cache/metrics_30day.csv
+
+# Token distribution analysis (for top models)
+traces=$(wc -l /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/*.csv | grep -v "total" | sort -nr | head -n 10 | awk '{print $2}')
+python3 analysis/plot_per_model_token_distributions.py $traces
+
+# Inter-arrival time analysis
+python3 analysis/plot_per_model_arrival_time.py /scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/DeepSeek-R1.csv
 ```
 
----
+### Running Full Analysis Pipeline
 
-### `plot_arrival_time_user.py`
-**Per-user inter-arrival time analysis**
-
-Analyzes arrival patterns for individual users:
-- **Boxplot by user** showing user-specific timing patterns
-- **Summary statistics** across all users
-- **Frequency analysis** (requests per hour per user)
-- **Variability metrics** (coefficient of variation)
-
-**Key Features:**
-- Groups data by user_id for individual analysis
-- Configurable minimum requests per user threshold
-- Selects top users by request volume for visualization
-- Supports summary plot generation with `--summary` flag
-
-**Usage:**
 ```bash
-python plot_arrival_time_user.py /path/to/metrics.csv --max-users 15 --min-requests 10
+# Run all analysis scripts in sequence
+./analysis/analyze.sh
 ```
-
----
-
-### `plot_token_distributions.py`
-**Token usage distribution analysis**
-
-Analyzes token consumption patterns across different models:
-- **Input tokens CDF** distribution analysis
-- **Output tokens CDF** distribution analysis  
-- **Output/Input ratio** analysis across models
-- **Multi-model comparison** capabilities
-
-**Key Features:**
-- Extracts token data using model_name or chute_id filtering
-- Creates CDF plots for multiple models simultaneously
-- Configurable model selection (top-K by frequency or specific models)
-- Supports ratio calculations for efficiency analysis
-
-**Usage:**
-```bash
-python plot_token_distributions.py /path/to/metrics.csv --models DeepSeek-R1 GPT-4 --top-k 8
-```
-
----
-
-## Dependencies
-
-All scripts require:
-- pandas
-- matplotlib
-- numpy
-- pathlib (standard library)
-- argparse (standard library)
-
-Additional dependencies for some scripts:
-- `readers.data_loader` module
-- `utils.plot` module for styling
 
 ## Output Structure
 
-Plots are organized in the `figures/` directory:
+All generated plots and figures are saved to:
 ```
 figures/
-├── metrics_analysis/           # overview.py output
-├── arrival_time/small/         # plot_arrival_time_model.py output  
-├── arrival_time/               # plot_arrival_time_user.py output
-└── token_distributions/        # plot_token_distributions.py output
+├── overview/
+├── user_analysis/
+├── per_model_token_distributions/
+├── per_model_arrival_time/
+├── per_model_arrival_time_per_user/
+├── per_user_model_diversity/
+└── ...
 ```
 
-## Common Patterns
+## Key Features
 
-All scripts:
-- Use high-resolution output (300 DPI)
-- Support log-scale visualization for wide data ranges
-- Provide statistical summaries in plot annotations
-- Generate timestamped output directories
-- Handle missing/invalid data gracefully
+- **Parallel Processing**: Many scripts support parallel processing for performance
+- **Caching**: CDF calculations are cached to speed up repeated runs
+- **Flexible Input**: Scripts can handle both single files and directories
+- **Comprehensive Visualization**: Multiple plot types for different analysis needs
+- **Statistical Summary**: Automatic generation of statistical summaries in plots
+
+## Dependencies
+
+- Python 3 with pandas, matplotlib, numpy
+- Required Python modules in `readers/` and `utils/` directories
+- Bash shell with standard utilities
+
+## Data Requirements
+
+The scripts expect specific column names in the CSV files:
+- `user_id`: Unique identifier for users
+- `chute_id` or `model_id`: Model identifier
+- `input_tokens`, `output_tokens`: Token usage metrics
+- `started_at`, `completed_at`: Timestamps for requests
+- `ttft`, `duration`: Timing metrics
+
+## Caching Behavior
+
+- CDF data is cached in CSV files to avoid recomputation
+- Cache files are stored in the same directory as output plots
+- Use `--force-recompute` flag to refresh cached data
