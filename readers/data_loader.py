@@ -334,9 +334,9 @@ def _apply_metrics_transforms(df: pd.DataFrame) -> pd.DataFrame:
 
     # Convert timestamp columns to datetime if they exist
     if "started_at" in df.columns:
-        df["started_at"] = pd.to_datetime(df["started_at"], errors="coerce")
+        df["started_at"] = pd.to_datetime(df["started_at"], format='mixed', errors="coerce")
     if "completed_at" in df.columns:
-        df["completed_at"] = pd.to_datetime(df["completed_at"], errors="coerce")
+        df["completed_at"] = pd.to_datetime(df["completed_at"], format='mixed', errors="coerce")
 
     # Calculate duration where both timestamps exist
     if "started_at" in df.columns and "completed_at" in df.columns:
