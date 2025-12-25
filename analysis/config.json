@@ -1,0 +1,21 @@
+{
+  "data": {
+    "default_input_file": "/scratch/juncheng/data/prefix_cache/metrics_30day_head.csv",
+    "data_directory": "/scratch/juncheng/data/prefix_cache/",
+    "per_model_directory": "/scratch/juncheng/data/prefix_cache/data/metrics_30day/per_model/"
+  },
+  "output": {
+    "base_output_dir": "figures",
+    "plot_dpi": 300,
+    "plot_bbox_inches": "tight"
+  },
+  "analysis": {
+    "large_dataset_threshold": 1000000,
+    "outlier_percentile": 99.9,
+    "token_bucket_size": 1000
+  },
+  "plotting": {
+    "default_figsize": [12, 8],
+    "boxplot_figsize": [16, 10]
+  }
+}
